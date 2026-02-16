@@ -1,0 +1,46 @@
+# R project files
+.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata
+*.Rproj
+
+# Output directories (generated during pipeline run)
+results/
+diagnostics/
+evaluation/
+processing/
+country_priors/
+checkpoints/
+outputs/
+compiled_models/
+plots/
+figures_publication/
+tables_publication/
+
+# Data files (too large for git, may be proprietary)
+data/*.xlsx
+data/*.csv
+data/*.zip
+data/dismodresults/
+data/original/
+data/processed/
+data/world-administrative-boundaries/
+
+# Excel temporary files
+~$*.xlsx
+*.tmp
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Compiled R files (intermediate outputs)
+*.rds
