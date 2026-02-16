@@ -32,7 +32,9 @@ if (!dir.exists("results/country_specific_ac_nested")) {
   dir.create("results/country_specific_ac_nested", recursive = TRUE)
 }
 
-country_specific_ac_predictions <- list()
+# [MEM-OPT] Predictions are written to disk per-country (predictions.csv).
+# After the loop, they are read back and combined. This avoids accumulating
+# hundreds of data frames in RAM during the 370-iteration loop.
 
 for (gender in genders) {
   cat(sprintf("\nCountry-specific models: %s\n", gender))
@@ -83,7 +85,18 @@ for (gender in genders) {
   countries <- list.files(file.path("country_priors", gender), pattern = "_regional_ac_priors_nested.csv")
   countries <- sub("_regional_ac_priors_nested.csv", "", countries)
 
+  # [MEM-OPT] Counter for periodic deep garbage collection
+  country_counter <- 0L
+
   for (country_code in countries) {
+    country_counter <- country_counter + 1L
+
+    # [MEM-OPT] Deep gc every 25 countries to combat memory fragmentation
+    if (country_counter %% 25 == 0) {
+      cat(sprintf("  [Memory cleanup at country %d/%d]\n", country_counter, length(countries)))
+      gc(full = TRUE)
+    }
+
     country_full_name <- country_name_mapping[country_code]
     cat(sprintf("  %s\n", country_full_name))
 
@@ -292,6 +305,9 @@ for (gender in genders) {
       combined_samples <- do.call(rbind, lapply(samples, as.matrix))
       n_samples <- nrow(combined_samples)
 
+      # [MEM-OPT] Free raw MCMC samples immediately - only combined_samples needed
+      rm(samples)
+
       # ============================================================
       # EXTRACT PARAMETER SAMPLES
       # ============================================================
@@ -433,9 +449,9 @@ for (gender in genders) {
           }
 
           # Save prediction matrices (logit scale, n_ages x n_samples)
-          saveRDS(predictions_cig, file = file.path(cig_dir, paste0(current_year, ".rds")), compress = "xz")
-          saveRDS(predictions_smoked, file = file.path(smoked_dir, paste0(current_year, ".rds")), compress = "xz")
-          saveRDS(predictions_any, file = file.path(any_dir, paste0(current_year, ".rds")), compress = "xz")
+          saveRDS(predictions_cig, file = file.path(cig_dir, paste0(current_year, ".rds")), compress = TRUE)
+          saveRDS(predictions_smoked, file = file.path(smoked_dir, paste0(current_year, ".rds")), compress = TRUE)
+          saveRDS(predictions_any, file = file.path(any_dir, paste0(current_year, ".rds")), compress = TRUE)
 
           # ============================================================
           # [OPT-5] VECTORIZED SUMMARY STATISTICS
@@ -502,8 +518,6 @@ for (gender in genders) {
 
       write.csv(prediction_results, file = file.path(country_dir, "predictions.csv"), row.names = FALSE)
 
-      country_specific_ac_predictions[[paste(country_code, gender, sep = "_")]] <- prediction_results
-
       # ============================================================
       # [OPT-1] FIXED CLEANUP ORDER
       #
@@ -516,7 +530,7 @@ for (gender in genders) {
       # ============================================================
 
       model_ref <- nimble_model  # Save reference before removing anything
-      rm(compiled_model, compiled_mcmc, mcmc_built, samples, results_list,
+      rm(compiled_model, compiled_mcmc, mcmc_built, results_list,
          cig_int_s, cig_age_spline_s, cig_age_lin_s, cig_cohort_s, cig_ac_s,
          smk_int_s, smk_age_spline_s, smk_age_lin_s, smk_cohort_s,
          any_int_s, any_age_spline_s, any_age_lin_s, any_cohort_s,
@@ -529,13 +543,30 @@ for (gender in genders) {
       warning(sprintf("Error fitting country model for %s, %s: %s", country_code, gender, e$message))
       cat(sprintf("    ERROR: %s\n", e$message))
     })
+
+    # [MEM-OPT] Safety net: ensure NIMBLE compiled objects are freed even after errors.
+    if (exists("nimble_model") && !is.null(nimble_model)) {
+      try(nimble::clearCompiled(nimble_model), silent = TRUE)
+      try(rm(nimble_model), silent = TRUE)
+    }
+    if (exists("compiled_model")) try(rm(compiled_model), silent = TRUE)
+    if (exists("compiled_mcmc")) try(rm(compiled_mcmc), silent = TRUE)
+    if (exists("mcmc_built")) try(rm(mcmc_built), silent = TRUE)
+    gc()
   }
 }
 
-final_predictions_country_specific_ac <- do.call(rbind, country_specific_ac_predictions)
+# [MEM-OPT] Read back all country predictions from disk instead of growing list in RAM.
+pred_files <- list.files("results/country_specific_ac_nested",
+                         pattern = "^predictions\\.csv$",
+                         recursive = TRUE, full.names = TRUE)
 
-# Handle case where all country models failed (empty list returns NULL)
-if (is.null(final_predictions_country_specific_ac) || nrow(final_predictions_country_specific_ac) == 0) {
+if (length(pred_files) > 0) {
+  cat(sprintf("  Reading back %d country prediction files from disk...\n", length(pred_files)))
+  final_predictions_country_specific_ac <- do.call(rbind,
+    lapply(pred_files, function(f) read.csv(f, stringsAsFactors = FALSE)))
+  rownames(final_predictions_country_specific_ac) <- NULL
+} else {
   warning("No country-specific predictions were generated. All models may have failed.")
   final_predictions_country_specific_ac <- data.frame(
     Year = integer(), Age_Midpoint = numeric(), Birth_Cohort = numeric(),
@@ -543,8 +574,6 @@ if (is.null(final_predictions_country_specific_ac) || nrow(final_predictions_cou
     Prevalence = numeric(), lower_ci = numeric(), upper_ci = numeric(),
     stringsAsFactors = FALSE
   )
-} else {
-  rownames(final_predictions_country_specific_ac) <- NULL
 }
 
 write.csv(

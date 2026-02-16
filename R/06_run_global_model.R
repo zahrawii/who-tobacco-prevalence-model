@@ -304,6 +304,11 @@ for (gender in genders) {
     }
   }
 
+  # [MEM-OPT] Free raw MCMC samples immediately after diagnostics.
+  # Only combined_samples_matrix is needed from here on.
+  rm(samples)
+  gc()
+
   # ---- 6.15 Extract Country-Specific Priors ----
   # (CORRECTED v2.3.1: Sample-wise computation, no double-counting)
 
@@ -703,9 +708,9 @@ for (gender in genders) {
         stop("Ordering violations detected")
       }
 
-      saveRDS(predictions_cig, file = file.path(cig_dir, paste0(current_year, ".rds")), compress = "xz")
-      saveRDS(predictions_smoked, file = file.path(smoked_dir, paste0(current_year, ".rds")), compress = "xz")
-      saveRDS(predictions_any, file = file.path(any_dir, paste0(current_year, ".rds")), compress = "xz")
+      saveRDS(predictions_cig, file = file.path(cig_dir, paste0(current_year, ".rds")), compress = TRUE)
+      saveRDS(predictions_smoked, file = file.path(smoked_dir, paste0(current_year, ".rds")), compress = TRUE)
+      saveRDS(predictions_any, file = file.path(any_dir, paste0(current_year, ".rds")), compress = TRUE)
 
       # Summarize for results
       def_type_cig <- paste0(current_def, "_cigarettes")
@@ -1015,9 +1020,9 @@ for (gender in genders) {
           predictions_any[j, ] <- log(p_any_full / (1 - p_any_full))
         }
 
-        saveRDS(predictions_cig, file = file.path(cig_dir, paste0(current_year, ".rds")), compress = "xz")
-        saveRDS(predictions_smoked, file = file.path(smoked_dir, paste0(current_year, ".rds")), compress = "xz")
-        saveRDS(predictions_any, file = file.path(any_dir, paste0(current_year, ".rds")), compress = "xz")
+        saveRDS(predictions_cig, file = file.path(cig_dir, paste0(current_year, ".rds")), compress = TRUE)
+        saveRDS(predictions_smoked, file = file.path(smoked_dir, paste0(current_year, ".rds")), compress = TRUE)
+        saveRDS(predictions_any, file = file.path(any_dir, paste0(current_year, ".rds")), compress = TRUE)
 
         p_cig_matrix <- plogis(predictions_cig)
         p_smoked_matrix <- plogis(predictions_smoked)
@@ -1101,7 +1106,7 @@ for (gender in genders) {
 
   # Clean up with OPT-1 pattern
   try(nimble::clearCompiled(nimble_model), silent = TRUE)
-  rm(compiled_model, compiled_mcmc, mcmc_built, nimble_model, samples)
+  rm(compiled_model, compiled_mcmc, mcmc_built, nimble_model)
   gc()
 }
 
