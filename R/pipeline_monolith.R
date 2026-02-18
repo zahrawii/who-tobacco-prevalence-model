@@ -2751,18 +2751,7 @@ for (gender in genders) {
   countries <- list.files(file.path("country_priors", gender), pattern = "_regional_ac_priors_nested.csv")
   countries <- sub("_regional_ac_priors_nested.csv", "", countries)
 
-  # [MEM-OPT] Counter for periodic memory monitoring
-  country_counter <- 0L
-
   for (country_code in countries) {
-    country_counter <- country_counter + 1L
-
-    # [MEM-OPT] Periodic memory check (every 25 countries)
-    if (country_counter %% 25 == 0) {
-      cat(sprintf("  [Progress: country %d/%d]\n", country_counter, length(countries)))
-      gc()  # Regular gc only — NOT gc(full=TRUE) which corrupts NIMBLE state
-    }
-
     country_full_name <- country_name_mapping[country_code]
     cat(sprintf("  %s\n", country_full_name))
     
@@ -2782,17 +2771,11 @@ for (gender in genders) {
     get_prior <- function(param_name) {
       row <- priors_df[priors_df$parameter == param_name, ]
       if (nrow(row) == 0) return(list(mean = 0, sd = 1))
-      m <- row$mean[1]
-      s <- row$sd[1]
-      # Guard against NaN/NA from any source
-      if (!is.finite(m)) m <- 0
-      if (!is.finite(s) || s <= 0) s <- 1
-      list(mean = m, sd = max(s, 1e-6))
+      list(mean = row$mean, sd = max(row$sd, 1e-6))
     }
 
     # Helper function to convert SD to precision safely
     sd_to_prec <- function(sd_val) {
-      sd_val[!is.finite(sd_val)] <- 1  # Replace NaN/NA/Inf with safe default
       sd_safe <- pmax(sd_val, 0.01)  # Minimum SD = 0.01
       prec <- 1 / (sd_safe^2)
       return(pmin(prec, 10000))  # Maximum precision = 10000
@@ -3335,18 +3318,6 @@ for (gender in genders) {
       cat(sprintf("    ERROR: %s\n", e$message))
     })
 
-    # [MEM-OPT] Safety net: remove lingering NIMBLE objects after errors.
-    # IMPORTANT: Do NOT call clearCompiled() here — on error paths the model
-    # may never have been fully compiled, and clearCompiled on a half-built
-    # model corrupts NIMBLE's internal DLL state, causing NaN in subsequent
-    # country models. Just rm() and let gc() handle finalization.
-    for (obj_name in c("nimble_model", "model_ref", "compiled_model",
-                       "compiled_mcmc", "mcmc_built")) {
-      if (exists(obj_name, inherits = FALSE)) {
-        try(rm(list = obj_name), silent = TRUE)
-      }
-    }
-    gc()
   }
 }
 
