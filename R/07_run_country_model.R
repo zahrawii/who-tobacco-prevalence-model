@@ -152,33 +152,83 @@ for (gender in genders) {
           sds[i] <- priors_df$sd[row]
         } else {
           means[i] <- 0
-          sds[i] <- 0.5
+          sds[i] <- 1
         }
       }
       list(means = means, sds = sds)
     }
 
-    cig_age_priors <- get_prior_vector("cig_age_spline_", nAgeSpline)
-    cig_cohort_priors <- get_prior_vector("cig_cohort_spline_", nCohortSpline)
-    cig_ac_priors <- get_prior_vector("cig_age_cohort_interaction_", nAgeXCohortSplines)
+    cig_age_spline_priors <- get_prior_vector("cig_age_spline_", nAgeSpline)
+    cig_cohort_spline_priors <- get_prior_vector("cig_cohort_spline_", nCohortSpline)
+    cig_age_cohort_priors <- get_prior_vector("cig_age_cohort_interaction_", nAgeXCohortSplines)
 
-    smkextra_age_priors <- get_prior_vector("smkextra_age_spline_", nAgeSpline)
-    smkextra_cohort_priors <- get_prior_vector("smkextra_cohort_spline_", nCohortSpline)
+    smkextra_age_spline_priors <- get_prior_vector("smkextra_age_spline_", nAgeSpline)
+    smkextra_cohort_spline_priors <- get_prior_vector("smkextra_cohort_spline_", nCohortSpline)
 
-    anyextra_age_priors <- get_prior_vector("anyextra_age_spline_", nAgeSpline)
-    anyextra_cohort_priors <- get_prior_vector("anyextra_cohort_spline_", nCohortSpline)
+    anyextra_age_spline_priors <- get_prior_vector("anyextra_age_spline_", nAgeSpline)
+    anyextra_cohort_spline_priors <- get_prior_vector("anyextra_cohort_spline_", nCohortSpline)
 
     # ---- Prepare NIMBLE Data ----
 
+    # CORRECTED: No smkextra/anyextra age-cohort constants
     nimble_constants_country <- list(
       N = nrow(country_data),
+      nSurvey = nSurvey,
       nAgeSpline = nAgeSpline,
       nCohortSpline = nCohortSpline,
       nAgeXCohortSplines = nAgeXCohortSplines,
-      nSurvey = nSurvey,
-      Survey = as.integer(country_data$Num_Survey)
+      Survey = as.integer(country_data$Num_Survey),
+
+      # CIG priors
+      cig_def_code_shared_prior_mean = get_prior("cig_def_code_shared")$mean,
+      cig_def_code_shared_prior_prec = sd_to_prec(get_prior("cig_def_code_shared")$sd),
+
+      cig_intercept_prior_mean = get_prior("cig_intercept")$mean,
+      cig_intercept_prior_prec = sd_to_prec(get_prior("cig_intercept")$sd),
+
+      cig_age_linear_smooth_effect_prior_mean = get_prior("cig_age_linear_smooth_effect")$mean,
+      cig_age_linear_smooth_effect_prior_prec = sd_to_prec(get_prior("cig_age_linear_smooth_effect")$sd),
+
+      # CIG spline priors (using ordered extraction)
+      cig_age_spline_prior_means = cig_age_spline_priors$means,
+      cig_age_spline_prior_precs = sd_to_prec(cig_age_spline_priors$sds),
+
+      cig_cohort_spline_prior_means = cig_cohort_spline_priors$means,
+      cig_cohort_spline_prior_precs = sd_to_prec(cig_cohort_spline_priors$sds),
+
+      cig_age_cohort_prior_means = cig_age_cohort_priors$means,
+      cig_age_cohort_prior_precs = sd_to_prec(cig_age_cohort_priors$sds),
+
+      # SMKEXTRA priors (NO age-cohort)
+      smkextra_intercept_prior_mean = get_prior("smkextra_intercept")$mean,
+      smkextra_intercept_prior_prec = sd_to_prec(get_prior("smkextra_intercept")$sd),
+
+      smkextra_age_linear_smooth_effect_prior_mean = get_prior("smkextra_age_linear_smooth_effect")$mean,
+      smkextra_age_linear_smooth_effect_prior_prec = sd_to_prec(get_prior("smkextra_age_linear_smooth_effect")$sd),
+
+      # SMKEXTRA spline priors (using ordered extraction)
+      smkextra_age_spline_prior_means = smkextra_age_spline_priors$means,
+      smkextra_age_spline_prior_precs = sd_to_prec(smkextra_age_spline_priors$sds),
+
+      smkextra_cohort_spline_prior_means = smkextra_cohort_spline_priors$means,
+      smkextra_cohort_spline_prior_precs = sd_to_prec(smkextra_cohort_spline_priors$sds),
+
+      # ANYEXTRA priors (NO age-cohort)
+      anyextra_intercept_prior_mean = get_prior("anyextra_intercept")$mean,
+      anyextra_intercept_prior_prec = sd_to_prec(get_prior("anyextra_intercept")$sd),
+
+      anyextra_age_linear_smooth_effect_prior_mean = get_prior("anyextra_age_linear_smooth_effect")$mean,
+      anyextra_age_linear_smooth_effect_prior_prec = sd_to_prec(get_prior("anyextra_age_linear_smooth_effect")$sd),
+
+      # ANYEXTRA spline priors (using ordered extraction)
+      anyextra_age_spline_prior_means = anyextra_age_spline_priors$means,
+      anyextra_age_spline_prior_precs = sd_to_prec(anyextra_age_spline_priors$sds),
+
+      anyextra_cohort_spline_prior_means = anyextra_cohort_spline_priors$means,
+      anyextra_cohort_spline_prior_precs = sd_to_prec(anyextra_cohort_spline_priors$sds)
     )
 
+    # DATA
     nimble_data_country <- list(
       Prevalence = country_data$prevalence,
       Def_Code_Binary = country_data$def_code_binary,
@@ -191,36 +241,7 @@ for (gender in genders) {
       age_linear_smooth = country_data$age_linear_smooth,
       spline_weight_var = country_data$spline_weight_var,
       linear_weight_var = country_data$linear_weight_var,
-      weight = country_data$weight,
-      # Prior hyperparameters
-      cig_intercept_prior_mean = get_prior("cig_intercept")$mean,
-      cig_intercept_prior_prec = sd_to_prec(get_prior("cig_intercept")$sd),
-      cig_def_code_shared_prior_mean = get_prior("cig_def_code_shared")$mean,
-      cig_def_code_shared_prior_prec = sd_to_prec(get_prior("cig_def_code_shared")$sd),
-      cig_age_linear_smooth_effect_prior_mean = get_prior("cig_age_linear_smooth_effect")$mean,
-      cig_age_linear_smooth_effect_prior_prec = sd_to_prec(get_prior("cig_age_linear_smooth_effect")$sd),
-      cig_age_spline_prior_means = cig_age_priors$means,
-      cig_age_spline_prior_precs = sd_to_prec(cig_age_priors$sds),
-      cig_cohort_spline_prior_means = cig_cohort_priors$means,
-      cig_cohort_spline_prior_precs = sd_to_prec(cig_cohort_priors$sds),
-      cig_age_cohort_prior_means = cig_ac_priors$means,
-      cig_age_cohort_prior_precs = sd_to_prec(cig_ac_priors$sds),
-      smkextra_intercept_prior_mean = get_prior("smkextra_intercept")$mean,
-      smkextra_intercept_prior_prec = sd_to_prec(get_prior("smkextra_intercept")$sd),
-      smkextra_age_linear_smooth_effect_prior_mean = get_prior("smkextra_age_linear_smooth_effect")$mean,
-      smkextra_age_linear_smooth_effect_prior_prec = sd_to_prec(get_prior("smkextra_age_linear_smooth_effect")$sd),
-      smkextra_age_spline_prior_means = smkextra_age_priors$means,
-      smkextra_age_spline_prior_precs = sd_to_prec(smkextra_age_priors$sds),
-      smkextra_cohort_spline_prior_means = smkextra_cohort_priors$means,
-      smkextra_cohort_spline_prior_precs = sd_to_prec(smkextra_cohort_priors$sds),
-      anyextra_intercept_prior_mean = get_prior("anyextra_intercept")$mean,
-      anyextra_intercept_prior_prec = sd_to_prec(get_prior("anyextra_intercept")$sd),
-      anyextra_age_linear_smooth_effect_prior_mean = get_prior("anyextra_age_linear_smooth_effect")$mean,
-      anyextra_age_linear_smooth_effect_prior_prec = sd_to_prec(get_prior("anyextra_age_linear_smooth_effect")$sd),
-      anyextra_age_spline_prior_means = anyextra_age_priors$means,
-      anyextra_age_spline_prior_precs = sd_to_prec(anyextra_age_priors$sds),
-      anyextra_cohort_spline_prior_means = anyextra_cohort_priors$means,
-      anyextra_cohort_spline_prior_precs = sd_to_prec(anyextra_cohort_priors$sds)
+      weight = country_data$weight
     )
 
     # ---- Generate Initial Values ----
@@ -238,13 +259,18 @@ for (gender in genders) {
         residual_sd = runif(1, 0.5, 1.0),
         survey_intercept_precision = rgamma(1, 3, 1),
         survey_intercept = rnorm(nSurvey, 0, 0.1),
-        cig_age_spline = rnorm(nAgeSpline, cig_age_priors$means, 0.05),
-        cig_cohort_spline = rnorm(nCohortSpline, cig_cohort_priors$means, 0.05),
-        cig_age_cohort_interaction = rnorm(nAgeXCohortSplines, cig_ac_priors$means, 0.02),
-        smkextra_age_spline = rnorm(nAgeSpline, smkextra_age_priors$means, 0.05),
-        smkextra_cohort_spline = rnorm(nCohortSpline, smkextra_cohort_priors$means, 0.05),
-        anyextra_age_spline = rnorm(nAgeSpline, anyextra_age_priors$means, 0.05),
-        anyextra_cohort_spline = rnorm(nCohortSpline, anyextra_cohort_priors$means, 0.05)
+        # CIG spline arrays (using ordered prior means)
+        cig_age_spline = rnorm(nAgeSpline, cig_age_spline_priors$means, 0.05),
+        cig_cohort_spline = rnorm(nCohortSpline, cig_cohort_spline_priors$means, 0.05),
+        cig_age_cohort_interaction = rnorm(nAgeXCohortSplines, cig_age_cohort_priors$means, 0.02),
+
+        # SMKEXTRA spline arrays (NO age-cohort)
+        smkextra_age_spline = rnorm(nAgeSpline, smkextra_age_spline_priors$means, 0.05),
+        smkextra_cohort_spline = rnorm(nCohortSpline, smkextra_cohort_spline_priors$means, 0.05),
+
+        # ANYEXTRA spline arrays (NO age-cohort)
+        anyextra_age_spline = rnorm(nAgeSpline, anyextra_age_spline_priors$means, 0.05),
+        anyextra_cohort_spline = rnorm(nCohortSpline, anyextra_cohort_spline_priors$means, 0.05)
       )
     }
 
@@ -261,15 +287,40 @@ for (gender in genders) {
         name = paste0("CountryModel_", country_code, "_", gender)
       )
 
+      # Check for uninitialized nodes
+      uninit_nodes <- nimble_model$initializeInfo()$uninitializedNodes
+      if (length(uninit_nodes) > 0) {
+        cat(sprintf("    WARNING: Uninitialized nodes: %s\n",
+                    paste(head(uninit_nodes, 5), collapse = ", ")))
+      }
+
+      # Calculate initial log probability
+      init_logprob <- try(nimble_model$calculate(), silent = TRUE)
+      if (inherits(init_logprob, "try-error") || !is.finite(init_logprob)) {
+        cat(sprintf("    WARNING: Initial logProb is invalid: %s\n", init_logprob))
+        node_logprobs <- sapply(nimble_model$getNodeNames(stochOnly = TRUE), function(n) {
+          tryCatch(nimble_model$calculate(n), error = function(e) NA)
+        })
+        bad_nodes <- names(node_logprobs)[!is.finite(node_logprobs)]
+        if (length(bad_nodes) > 0) {
+          cat(sprintf("    Problematic nodes: %s\n", paste(head(bad_nodes, 10), collapse = ", ")))
+        }
+      } else {
+        cat(sprintf("    Initial logProb: %.2f\n", init_logprob))
+      }
+
+      # CORRECTED: Monitors - no smkextra/anyextra age-cohort
       mcmc_config <- configureMCMC(
         nimble_model,
         monitors = c(
-          "cig_intercept", "cig_def_code_shared", "cig_age_linear_smooth_effect",
-          "cig_age_spline", "cig_cohort_spline", "cig_age_cohort_interaction",
-          "smkextra_intercept", "smkextra_age_linear_smooth_effect",
-          "smkextra_age_spline", "smkextra_cohort_spline",
-          "anyextra_intercept", "anyextra_age_linear_smooth_effect",
-          "anyextra_age_spline", "anyextra_cohort_spline"
+          "cig_def_code_shared",
+          "cig_intercept", "cig_age_spline", "cig_age_linear_smooth_effect",
+          "cig_cohort_spline", "cig_age_cohort_interaction",
+          "smkextra_intercept", "smkextra_age_spline", "smkextra_age_linear_smooth_effect",
+          "smkextra_cohort_spline",
+          "anyextra_intercept", "anyextra_age_spline", "anyextra_age_linear_smooth_effect",
+          "anyextra_cohort_spline",
+          "residual_sd"
         ),
         thin = THINNING_INTERVAL,
         enableWAIC = FALSE,
@@ -288,35 +339,89 @@ for (gender in genders) {
         inits = inits_list,
         thin = THINNING_INTERVAL,
         samplesAsCodaMCMC = TRUE,
-        progressBar = FALSE
+        progressBar = FALSE,
+        summary = TRUE
       )
 
-      combined_samples <- do.call(rbind, lapply(samples, as.matrix))
-      n_samples <- nrow(combined_samples)
+      combined_samples <- do.call(rbind, lapply(samples$samples, as.matrix))
 
-      # [MEM-OPT] Free raw MCMC samples immediately - only combined_samples needed
+      # Check for NaN/Inf
+      n_invalid <- sum(!is.finite(combined_samples))
+      if (n_invalid > 0) {
+        cat(sprintf("    WARNING: %d non-finite values in samples\n", n_invalid))
+      }
+
+      # R-hat diagnostic
+      gelman_diag <- try({
+        param_vars <- apply(combined_samples, 2, var, na.rm = TRUE)
+        varying_params <- names(param_vars)[param_vars > 1e-10]
+        if (length(varying_params) > 0) {
+          samples_filtered <- lapply(samples$samples, function(s) s[, varying_params, drop = FALSE])
+          class(samples_filtered) <- "mcmc.list"
+          gelman.diag(samples_filtered, multivariate = FALSE)
+        } else NULL
+      }, silent = TRUE)
+
+      if (!inherits(gelman_diag, "try-error") && !is.null(gelman_diag)) {
+        max_rhat <- max(gelman_diag$psrf[, "Point est."], na.rm = TRUE)
+        if (is.finite(max_rhat)) {
+          cat(sprintf("    R-hat: %.3f %s\n", max_rhat,
+                      ifelse(max_rhat < 1.1, "(Good)", "(Check convergence)")))
+        }
+      }
+
+      # [MEM-OPT] Free raw MCMC samples immediately after diagnostics.
+      # Only combined_samples is needed from here on.
       rm(samples)
 
+      saveRDS(combined_samples, file = file.path(country_dir, "posterior_samples.rds"), compress = TRUE)
+
+      # Extract samples for prediction
+      extract_head_samples_country <- function(prefix, combined_samples, has_age_cohort = FALSE) {
+        result <- list(
+          intercept     = combined_samples[, paste0(prefix, "_intercept")],
+          age_linear    = combined_samples[, paste0(prefix, "_age_linear_smooth_effect")],
+          age_spline    = combined_samples[, grep(paste0("^", prefix, "_age_spline\\["), colnames(combined_samples)), drop = FALSE],
+          cohort_spline = combined_samples[, grep(paste0("^", prefix, "_cohort_spline\\["), colnames(combined_samples)), drop = FALSE]
+        )
+        if (has_age_cohort) {
+          result$age_cohort <- combined_samples[, grep(paste0("^", prefix, "_age_cohort_interaction\\["), colnames(combined_samples)), drop = FALSE]
+        }
+        result
+      }
+
+      cig_samples_full      <- extract_head_samples_country("cig", combined_samples, has_age_cohort = TRUE)
+      smkextra_samples_full <- extract_head_samples_country("smkextra", combined_samples, has_age_cohort = FALSE)
+      anyextra_samples_full <- extract_head_samples_country("anyextra", combined_samples, has_age_cohort = FALSE)
+      def_code_shared_full  <- combined_samples[, "cig_def_code_shared"]
+
       # ============================================================
-      # EXTRACT PARAMETER SAMPLES
+      # [OPT-4] Pre-subset to sampled_indices ONCE (avoids repeated indexing)
       # ============================================================
+      n_samples <- min(1000, nrow(combined_samples))
+      sampled_indices <- sort(sample(1:nrow(combined_samples), n_samples))
 
-      cig_int_s <- combined_samples[, "cig_intercept"]
-      def_shared_s <- combined_samples[, "cig_def_code_shared"]
-      cig_age_lin_s <- combined_samples[, "cig_age_linear_smooth_effect"]
-      cig_age_spline_s <- combined_samples[, grep("^cig_age_spline\\[", colnames(combined_samples))]
-      cig_cohort_s <- combined_samples[, grep("^cig_cohort_spline\\[", colnames(combined_samples))]
-      cig_ac_s <- combined_samples[, grep("^cig_age_cohort_interaction\\[", colnames(combined_samples))]
+      cig_int_s          <- cig_samples_full$intercept[sampled_indices]
+      cig_age_spline_s   <- cig_samples_full$age_spline[sampled_indices, , drop = FALSE]
+      cig_age_lin_s      <- cig_samples_full$age_linear[sampled_indices]
+      cig_cohort_s       <- cig_samples_full$cohort_spline[sampled_indices, , drop = FALSE]
+      cig_ac_s           <- cig_samples_full$age_cohort[sampled_indices, , drop = FALSE]
 
-      smk_int_s <- combined_samples[, "smkextra_intercept"]
-      smk_age_lin_s <- combined_samples[, "smkextra_age_linear_smooth_effect"]
-      smk_age_spline_s <- combined_samples[, grep("^smkextra_age_spline\\[", colnames(combined_samples))]
-      smk_cohort_s <- combined_samples[, grep("^smkextra_cohort_spline\\[", colnames(combined_samples))]
+      smk_int_s          <- smkextra_samples_full$intercept[sampled_indices]
+      smk_age_spline_s   <- smkextra_samples_full$age_spline[sampled_indices, , drop = FALSE]
+      smk_age_lin_s      <- smkextra_samples_full$age_linear[sampled_indices]
+      smk_cohort_s       <- smkextra_samples_full$cohort_spline[sampled_indices, , drop = FALSE]
 
-      any_int_s <- combined_samples[, "anyextra_intercept"]
-      any_age_lin_s <- combined_samples[, "anyextra_age_linear_smooth_effect"]
-      any_age_spline_s <- combined_samples[, grep("^anyextra_age_spline\\[", colnames(combined_samples))]
-      any_cohort_s <- combined_samples[, grep("^anyextra_cohort_spline\\[", colnames(combined_samples))]
+      any_int_s          <- anyextra_samples_full$intercept[sampled_indices]
+      any_age_spline_s   <- anyextra_samples_full$age_spline[sampled_indices, , drop = FALSE]
+      any_age_lin_s      <- anyextra_samples_full$age_linear[sampled_indices]
+      any_cohort_s       <- anyextra_samples_full$cohort_spline[sampled_indices, , drop = FALSE]
+
+      def_shared_s       <- def_code_shared_full[sampled_indices]
+
+      # Free full sample matrices (no longer needed)
+      rm(cig_samples_full, smkextra_samples_full, anyextra_samples_full,
+         def_code_shared_full, combined_samples)
 
       # ============================================================
       # [OPT-6] PRECOMPUTE COHORT SPLINES FOR ALL YEARS
