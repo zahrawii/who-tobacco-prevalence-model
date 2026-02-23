@@ -638,6 +638,20 @@ for (gender in genders) {
       cat(sprintf("    ERROR: %s\n", e$message))
     })
 
+    # Safety net: release NIMBLE compiled objects after errors.
+    # On success these were already cleaned up inside tryCatch (OPT-1).
+    # On error they may linger and leak DLLs.
+    for (obj_name in c("nimble_model", "model_ref", "compiled_model",
+                       "compiled_mcmc", "mcmc_built")) {
+      if (exists(obj_name, inherits = FALSE)) {
+        if (obj_name %in% c("nimble_model", "model_ref")) {
+          try(nimble::clearCompiled(get(obj_name)), silent = TRUE)
+        }
+        try(rm(list = obj_name), silent = TRUE)
+      }
+    }
+    gc()
+
   }
 }
 

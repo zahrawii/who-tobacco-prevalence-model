@@ -95,7 +95,7 @@ if (!exists("DIAGNOSTICS_AVAILABLE")) DIAGNOSTICS_AVAILABLE <- TRUE
 
 # Increase max DLLs to prevent "maximal number of DLLs reached" error
 # when fitting 360+ country models (each NIMBLE model compiles to a DLL)
-Sys.setenv(R_MAX_NUM_DLLS = 600)
+Sys.setenv(R_MAX_NUM_DLLS = 1000)
 
 nimbleOptions(verbose = FALSE)
 nimbleOptions(MCMCprogressBar = TRUE)
@@ -3317,6 +3317,20 @@ for (gender in genders) {
       warning(sprintf("Error fitting country model for %s, %s: %s", country_code, gender, e$message))
       cat(sprintf("    ERROR: %s\n", e$message))
     })
+
+    # Safety net: release NIMBLE compiled objects after errors.
+    # On success these were already cleaned up inside tryCatch (OPT-1).
+    # On error they may linger and leak DLLs.
+    for (obj_name in c("nimble_model", "model_ref", "compiled_model",
+                       "compiled_mcmc", "mcmc_built")) {
+      if (exists(obj_name, inherits = FALSE)) {
+        if (obj_name %in% c("nimble_model", "model_ref")) {
+          try(nimble::clearCompiled(get(obj_name)), silent = TRUE)
+        }
+        try(rm(list = obj_name), silent = TRUE)
+      }
+    }
+    gc()
 
   }
 }

@@ -14,7 +14,7 @@
 # ---- CRITICAL: Increase DLL Limit BEFORE Loading NIMBLE ----
 # Each NIMBLE model compiles to a separate DLL. With 191 countries × 2 sexes = 382+ models,
 # we exceed R's default limit of 100. Must be set before loading nimble.
-Sys.setenv(R_MAX_NUM_DLLS = 600)
+Sys.setenv(R_MAX_NUM_DLLS = 1000)
 
 # ---- Package Loading Function ----
 
