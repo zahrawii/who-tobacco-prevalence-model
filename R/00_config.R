@@ -2,7 +2,7 @@
 #
 #                    WHO TOBACCO CONTROL PREVALENCE PROJECTION MODEL
 #                              00_config.R - Configuration
-#                                   VERSION 2.3.2
+#                                   VERSION 2.3.3
 #
 #   Contains: All constants, MCMC settings, and output directory structure
 #   Source this file first before any other module
@@ -40,8 +40,8 @@ required_packages <- c(
   "nimble", "coda",
   # Splines
   "splines",
-  # Parallel processing
-  "foreach", "doParallel", "parallel",
+  # Parallel processing & subprocess isolation
+  "foreach", "doParallel", "parallel", "callr",
   # Visualization
   "ggplot2", "scales", "viridis", "ggpubr", "ggrepel", "ggsci", "patchwork", "grid",
   # Tables
@@ -167,7 +167,7 @@ print_config <- function() {
 #########################################################################
 #
 #              WHO TOBACCO CONTROL PREVALENCE PROJECTION
-#                        VERSION 2.3.2 (NIMBLE)
+#                        VERSION 2.3.3 (NIMBLE)
 #
 #########################################################################
 

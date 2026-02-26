@@ -2,20 +2,29 @@
 #
 #                    WHO TOBACCO CONTROL PREVALENCE PROJECTION MODEL
 #                    07_run_country_model.R - Country-Specific Model Fitting
-#                                   VERSION 2.3.2
+#                                   VERSION 2.3.3
 #
 #   Contains: Section 11-12 from pipeline_monolith.R
-#     - Country-specific model fitting loop (all 191 countries × 2 sexes)
-#     - Vectorized prediction with OPT-1 through OPT-6 optimizations
-#     - Country-specific weighted prevalence trends
+#     - Country-specific model fitting loop (all 191 countries x 2 sexes)
+#     - Vectorized prediction with OPT-2 through OPT-6 optimizations
+#     - SUBPROCESS ISOLATION: Each country runs in a fresh R process via callr
+#       to prevent DLL accumulation and progressive RAM growth
 #
 #   PERFORMANCE OPTIMIZATIONS INCLUDED:
-#     - OPT-1: Fixed clearCompiled order (prevents DLL memory leak)
 #     - OPT-2: Precompute age components outside country loop
 #     - OPT-3: Vectorized tensor product
 #     - OPT-4: Matrix-based prediction
 #     - OPT-5: rowMeans instead of apply
 #     - OPT-6: Single ns() call for all cohort years
+#     - SUBPROCESS: Each country in isolated R process (prevents DLL leak on Windows)
+#
+#   DLL ISOLATION:
+#     Each NIMBLE model compiles 2 C++ DLLs (model + MCMC). On Windows,
+#     dyn.unload() does not reliably release DLLs, causing "maximal number
+#     of DLLs reached" after ~200 countries. Running each country in a fresh
+#     R subprocess via callr::r() guarantees DLLs are released when the
+#     subprocess exits (OS-level guarantee). Overhead is ~5-10 seconds
+#     per country, negligible vs 20-30 min MCMC fitting time.
 #
 #   Requires: Global model fitted (06_run_global_model.R), country_priors/ directory
 #   Outputs: final_predictions_country_specific.csv, country_specific_ac_nested/
@@ -24,8 +33,603 @@
 #
 #########################################################################################
 
+# ============================================================
+# WORKER FUNCTION: Runs in a fresh R subprocess via callr::r()
+#
+# Receives: country_code, gender, path to shared data RDS
+# Produces: predictions.csv, posterior_samples.rds, prediction matrices
+# Returns:  list(success = TRUE/FALSE)
+# ============================================================
+
+fit_single_country_model <- function(country_code, gender, shared_data_path) {
+
+  # Load only packages needed for model fitting
+  suppressPackageStartupMessages({
+    library(nimble)
+    library(coda)
+    library(splines)
+    library(dplyr)
+  })
+  nimbleOptions(verbose = FALSE)
+  nimbleOptions(MCMCprogressBar = FALSE)
+  nimbleOptions(buildInterfacesForCompiledNestedNimbleFunctions = FALSE)
+
+  # Load shared data prepared by the main process
+  d <- readRDS(shared_data_path)
+
+  # Extract config
+  RANDOM_SEED          <- d$RANDOM_SEED
+  NUMBER_OF_CHAINS     <- d$NUMBER_OF_CHAINS
+  NUMBER_OF_BURN       <- d$NUMBER_OF_BURN
+  NUMBER_OF_ITERATIONS <- d$NUMBER_OF_ITERATIONS
+  THINNING_INTERVAL    <- d$THINNING_INTERVAL
+  target_year          <- d$target_year
+  PROJECTED_YEARS      <- d$PROJECTED_YEARS
+
+  # Extract data
+  regional_info        <- d$regional_info
+  clean_data           <- d$clean_data
+  country_name_mapping <- d$country_name_mapping
+  model_code           <- d$model_code
+
+  # Precomputed age components
+  age_midpoints_shared       <- d$age_midpoints_shared
+  n_ages                     <- d$n_ages
+  spline_weight_shared       <- d$spline_weight_shared
+  linear_weight_shared       <- d$linear_weight_shared
+  linear_age_product_shared  <- d$linear_age_product_shared
+  age_spline_mat_shared      <- d$age_spline_mat_shared
+  nAgeSpline_shared          <- d$nAgeSpline_shared
+  ones_ages                  <- d$ones_ages
+  gender_dir                 <- d$gender_dir
+
+  rm(d)
+
+  # Helper: check ordering constraints (stick-breaking: cig <= smoked <= any)
+  check_ordering_per_draw <- function(logit_cig, logit_smk, logit_any, tolerance = 1e-6) {
+    pc <- plogis(logit_cig)
+    ps <- plogis(logit_smk)
+    pa <- plogis(logit_any)
+    return(sum(pc > ps + tolerance) > 0 || sum(ps > pa + tolerance) > 0)
+  }
+
+  # --- Country Setup ---
+
+  country_full_name <- country_name_mapping[country_code]
+  country_dir <- file.path(gender_dir, country_full_name)
+  dir.create(country_dir, showWarnings = FALSE, recursive = TRUE)
+
+  priors_file <- file.path("country_priors", gender, paste0(country_code, "_regional_ac_priors_nested.csv"))
+
+  if (!file.exists(priors_file)) {
+    cat(sprintf("    WARNING: No priors for %s, %s - skipping\n", country_code, gender))
+    return(list(success = FALSE, error = "No priors file"))
+  }
+
+  priors_df <- read.csv(priors_file)
+
+  # Helper function to get prior values
+  get_prior <- function(param_name) {
+    row <- priors_df[priors_df$parameter == param_name, ]
+    if (nrow(row) == 0) return(list(mean = 0, sd = 1))
+    list(mean = row$mean, sd = max(row$sd, 1e-6))
+  }
+
+  # Helper function to convert SD to precision safely
+  sd_to_prec <- function(sd_val) {
+    sd_safe <- pmax(sd_val, 0.01)
+    prec <- 1 / (sd_safe^2)
+    return(pmin(prec, 10000))
+  }
+
+  # Filter country data
+  country_data <- clean_data %>%
+    filter(wb_country_abv == country_code, sex == gender)
+
+  if (nrow(country_data) == 0) {
+    cat(sprintf("    WARNING: No data for %s, %s - skipping\n", country_code, gender))
+    return(list(success = FALSE, error = "No data"))
+  }
+
+  country_data <- country_data %>%
+    mutate(
+      Num_Survey = as.numeric(factor(survey)),
+      Num_Year   = as.numeric(year),
+      age_range  = end_age - start_age,
+      weight     = 1 / (age_range + 1),
+      weight     = weight / mean(weight)
+    )
+
+  # ---- Prepare NIMBLE Constants for Country-Specific Model ----
+
+  nAgeSpline <- ncol(country_data[, grep("^age_spline_", names(country_data))])
+  nCohortSpline <- ncol(country_data[, grep("^cohort_spline_", names(country_data))])
+  nAgeXCohortSplines <- ncol(country_data[, grep("^age_cohort_", names(country_data))])
+  nSurvey <- length(unique(country_data$Num_Survey))
+
+  # Extract prior vectors with proper ordering
+  get_prior_vector <- function(prefix, n) {
+    means <- numeric(n)
+    sds <- numeric(n)
+    for (i in 1:n) {
+      param_name <- paste0(prefix, i)
+      row <- which(priors_df$parameter == param_name)
+      if (length(row) == 1) {
+        means[i] <- priors_df$mean[row]
+        sds[i] <- priors_df$sd[row]
+      } else {
+        means[i] <- 0
+        sds[i] <- 1
+      }
+    }
+    list(means = means, sds = sds)
+  }
+
+  cig_age_spline_priors <- get_prior_vector("cig_age_spline_", nAgeSpline)
+  cig_cohort_spline_priors <- get_prior_vector("cig_cohort_spline_", nCohortSpline)
+  cig_age_cohort_priors <- get_prior_vector("cig_age_cohort_interaction_", nAgeXCohortSplines)
+
+  smkextra_age_spline_priors <- get_prior_vector("smkextra_age_spline_", nAgeSpline)
+  smkextra_cohort_spline_priors <- get_prior_vector("smkextra_cohort_spline_", nCohortSpline)
+
+  anyextra_age_spline_priors <- get_prior_vector("anyextra_age_spline_", nAgeSpline)
+  anyextra_cohort_spline_priors <- get_prior_vector("anyextra_cohort_spline_", nCohortSpline)
+
+  # ---- Prepare NIMBLE Data ----
+
+  # CORRECTED: No smkextra/anyextra age-cohort constants
+  nimble_constants_country <- list(
+    N = nrow(country_data),
+    nSurvey = nSurvey,
+    nAgeSpline = nAgeSpline,
+    nCohortSpline = nCohortSpline,
+    nAgeXCohortSplines = nAgeXCohortSplines,
+    Survey = as.integer(country_data$Num_Survey),
+
+    # CIG priors
+    cig_def_code_shared_prior_mean = get_prior("cig_def_code_shared")$mean,
+    cig_def_code_shared_prior_prec = sd_to_prec(get_prior("cig_def_code_shared")$sd),
+
+    cig_intercept_prior_mean = get_prior("cig_intercept")$mean,
+    cig_intercept_prior_prec = sd_to_prec(get_prior("cig_intercept")$sd),
+
+    cig_age_linear_smooth_effect_prior_mean = get_prior("cig_age_linear_smooth_effect")$mean,
+    cig_age_linear_smooth_effect_prior_prec = sd_to_prec(get_prior("cig_age_linear_smooth_effect")$sd),
+
+    # CIG spline priors (using ordered extraction)
+    cig_age_spline_prior_means = cig_age_spline_priors$means,
+    cig_age_spline_prior_precs = sd_to_prec(cig_age_spline_priors$sds),
+
+    cig_cohort_spline_prior_means = cig_cohort_spline_priors$means,
+    cig_cohort_spline_prior_precs = sd_to_prec(cig_cohort_spline_priors$sds),
+
+    cig_age_cohort_prior_means = cig_age_cohort_priors$means,
+    cig_age_cohort_prior_precs = sd_to_prec(cig_age_cohort_priors$sds),
+
+    # SMKEXTRA priors (NO age-cohort)
+    smkextra_intercept_prior_mean = get_prior("smkextra_intercept")$mean,
+    smkextra_intercept_prior_prec = sd_to_prec(get_prior("smkextra_intercept")$sd),
+
+    smkextra_age_linear_smooth_effect_prior_mean = get_prior("smkextra_age_linear_smooth_effect")$mean,
+    smkextra_age_linear_smooth_effect_prior_prec = sd_to_prec(get_prior("smkextra_age_linear_smooth_effect")$sd),
+
+    # SMKEXTRA spline priors (using ordered extraction)
+    smkextra_age_spline_prior_means = smkextra_age_spline_priors$means,
+    smkextra_age_spline_prior_precs = sd_to_prec(smkextra_age_spline_priors$sds),
+
+    smkextra_cohort_spline_prior_means = smkextra_cohort_spline_priors$means,
+    smkextra_cohort_spline_prior_precs = sd_to_prec(smkextra_cohort_spline_priors$sds),
+
+    # ANYEXTRA priors (NO age-cohort)
+    anyextra_intercept_prior_mean = get_prior("anyextra_intercept")$mean,
+    anyextra_intercept_prior_prec = sd_to_prec(get_prior("anyextra_intercept")$sd),
+
+    anyextra_age_linear_smooth_effect_prior_mean = get_prior("anyextra_age_linear_smooth_effect")$mean,
+    anyextra_age_linear_smooth_effect_prior_prec = sd_to_prec(get_prior("anyextra_age_linear_smooth_effect")$sd),
+
+    # ANYEXTRA spline priors (using ordered extraction)
+    anyextra_age_spline_prior_means = anyextra_age_spline_priors$means,
+    anyextra_age_spline_prior_precs = sd_to_prec(anyextra_age_spline_priors$sds),
+
+    anyextra_cohort_spline_prior_means = anyextra_cohort_spline_priors$means,
+    anyextra_cohort_spline_prior_precs = sd_to_prec(anyextra_cohort_spline_priors$sds)
+  )
+
+  # DATA
+  nimble_data_country <- list(
+    Prevalence = country_data$prevalence,
+    Def_Code_Binary = country_data$def_code_binary,
+    Type_Cig = country_data$Type_Cig,
+    Type_Smoked = country_data$Type_Smoked,
+    Type_Any = country_data$Type_Any,
+    age_spline_matrix = as.matrix(country_data[, grep("^age_spline_", names(country_data))]),
+    cohort_spline_matrix = as.matrix(country_data[, grep("^cohort_spline_", names(country_data))]),
+    age_cohort_interaction_matrix = as.matrix(country_data[, grep("^age_cohort_", names(country_data))]),
+    age_linear_smooth = country_data$age_linear_smooth,
+    spline_weight_var = country_data$spline_weight_var,
+    linear_weight_var = country_data$linear_weight_var,
+    weight = country_data$weight
+  )
+
+  # ---- Generate Initial Values ----
+
+  generate_country_inits <- function(seed_offset = 0) {
+    set.seed(RANDOM_SEED + seed_offset)
+    list(
+      cig_def_code_shared = rnorm(1, get_prior("cig_def_code_shared")$mean, 0.1),
+      cig_intercept = rnorm(1, get_prior("cig_intercept")$mean, 0.2),
+      smkextra_intercept = rnorm(1, get_prior("smkextra_intercept")$mean, 0.2),
+      anyextra_intercept = rnorm(1, get_prior("anyextra_intercept")$mean, 0.2),
+      cig_age_linear_smooth_effect = runif(1, -0.05, -0.01),
+      smkextra_age_linear_smooth_effect = runif(1, -0.05, -0.01),
+      anyextra_age_linear_smooth_effect = runif(1, -0.05, -0.01),
+      residual_sd = runif(1, 0.5, 1.0),
+      survey_intercept_precision = rgamma(1, 3, 1),
+      survey_intercept = rnorm(nSurvey, 0, 0.1),
+      # CIG spline arrays (using ordered prior means)
+      cig_age_spline = rnorm(nAgeSpline, cig_age_spline_priors$means, 0.05),
+      cig_cohort_spline = rnorm(nCohortSpline, cig_cohort_spline_priors$means, 0.05),
+      cig_age_cohort_interaction = rnorm(nAgeXCohortSplines, cig_age_cohort_priors$means, 0.02),
+
+      # SMKEXTRA spline arrays (NO age-cohort)
+      smkextra_age_spline = rnorm(nAgeSpline, smkextra_age_spline_priors$means, 0.05),
+      smkextra_cohort_spline = rnorm(nCohortSpline, smkextra_cohort_spline_priors$means, 0.05),
+
+      # ANYEXTRA spline arrays (NO age-cohort)
+      anyextra_age_spline = rnorm(nAgeSpline, anyextra_age_spline_priors$means, 0.05),
+      anyextra_cohort_spline = rnorm(nCohortSpline, anyextra_cohort_spline_priors$means, 0.05)
+    )
+  }
+
+  inits_list <- lapply(1:NUMBER_OF_CHAINS, function(i) generate_country_inits(i))
+
+  # ---- Fit Country Model ----
+  # No tryCatch needed: errors propagate to the parent process.
+  # No cleanup needed: subprocess exit releases all DLLs and memory.
+
+  nimble_model <- nimbleModel(
+    code = model_code,
+    constants = nimble_constants_country,
+    data = nimble_data_country,
+    inits = inits_list[[1]],
+    name = paste0("CountryModel_", country_code, "_", gender)
+  )
+
+  # Check for uninitialized nodes
+  uninit_nodes <- nimble_model$initializeInfo()$uninitializedNodes
+  if (length(uninit_nodes) > 0) {
+    cat(sprintf("    WARNING: Uninitialized nodes: %s\n",
+                paste(head(uninit_nodes, 5), collapse = ", ")))
+  }
+
+  # Calculate initial log probability
+  init_logprob <- try(nimble_model$calculate(), silent = TRUE)
+  if (inherits(init_logprob, "try-error") || !is.finite(init_logprob)) {
+    cat(sprintf("    WARNING: Initial logProb is invalid: %s\n", init_logprob))
+    node_logprobs <- sapply(nimble_model$getNodeNames(stochOnly = TRUE), function(n) {
+      tryCatch(nimble_model$calculate(n), error = function(e) NA)
+    })
+    bad_nodes <- names(node_logprobs)[!is.finite(node_logprobs)]
+    if (length(bad_nodes) > 0) {
+      cat(sprintf("    Problematic nodes: %s\n", paste(head(bad_nodes, 10), collapse = ", ")))
+    }
+  } else {
+    cat(sprintf("    Initial logProb: %.2f\n", init_logprob))
+  }
+
+  # CORRECTED: Monitors - no smkextra/anyextra age-cohort
+  mcmc_config <- configureMCMC(
+    nimble_model,
+    monitors = c(
+      "cig_def_code_shared",
+      "cig_intercept", "cig_age_spline", "cig_age_linear_smooth_effect",
+      "cig_cohort_spline", "cig_age_cohort_interaction",
+      "smkextra_intercept", "smkextra_age_spline", "smkextra_age_linear_smooth_effect",
+      "smkextra_cohort_spline",
+      "anyextra_intercept", "anyextra_age_spline", "anyextra_age_linear_smooth_effect",
+      "anyextra_cohort_spline",
+      "residual_sd"
+    ),
+    thin = THINNING_INTERVAL,
+    enableWAIC = FALSE,
+    useConjugacy = FALSE
+  )
+
+  mcmc_built <- buildMCMC(mcmc_config)
+  compiled_model <- compileNimble(nimble_model)
+  compiled_mcmc <- compileNimble(mcmc_built, project = nimble_model)
+
+  samples <- runMCMC(
+    compiled_mcmc,
+    niter = NUMBER_OF_BURN + NUMBER_OF_ITERATIONS,
+    nburnin = NUMBER_OF_BURN,
+    nchains = NUMBER_OF_CHAINS,
+    inits = inits_list,
+    thin = THINNING_INTERVAL,
+    samplesAsCodaMCMC = TRUE,
+    progressBar = FALSE,
+    summary = TRUE
+  )
+
+  combined_samples <- do.call(rbind, lapply(samples$samples, as.matrix))
+
+  # Check for NaN/Inf
+  n_invalid <- sum(!is.finite(combined_samples))
+  if (n_invalid > 0) {
+    cat(sprintf("    WARNING: %d non-finite values in samples\n", n_invalid))
+  }
+
+  # R-hat diagnostic
+  gelman_diag <- try({
+    param_vars <- apply(combined_samples, 2, var, na.rm = TRUE)
+    varying_params <- names(param_vars)[param_vars > 1e-10]
+    if (length(varying_params) > 0) {
+      samples_filtered <- lapply(samples$samples, function(s) s[, varying_params, drop = FALSE])
+      class(samples_filtered) <- "mcmc.list"
+      gelman.diag(samples_filtered, multivariate = FALSE)
+    } else NULL
+  }, silent = TRUE)
+
+  if (!inherits(gelman_diag, "try-error") && !is.null(gelman_diag)) {
+    max_rhat <- max(gelman_diag$psrf[, "Point est."], na.rm = TRUE)
+    if (is.finite(max_rhat)) {
+      cat(sprintf("    R-hat: %.3f %s\n", max_rhat,
+                  ifelse(max_rhat < 1.1, "(Good)", "(Check convergence)")))
+    }
+  }
+
+  rm(samples)
+
+  saveRDS(combined_samples, file = file.path(country_dir, "posterior_samples.rds"), compress = TRUE)
+
+  # Extract samples for prediction
+  extract_head_samples_country <- function(prefix, combined_samples, has_age_cohort = FALSE) {
+    result <- list(
+      intercept     = combined_samples[, paste0(prefix, "_intercept")],
+      age_linear    = combined_samples[, paste0(prefix, "_age_linear_smooth_effect")],
+      age_spline    = combined_samples[, grep(paste0("^", prefix, "_age_spline\\["), colnames(combined_samples)), drop = FALSE],
+      cohort_spline = combined_samples[, grep(paste0("^", prefix, "_cohort_spline\\["), colnames(combined_samples)), drop = FALSE]
+    )
+    if (has_age_cohort) {
+      result$age_cohort <- combined_samples[, grep(paste0("^", prefix, "_age_cohort_interaction\\["), colnames(combined_samples)), drop = FALSE]
+    }
+    result
+  }
+
+  cig_samples_full      <- extract_head_samples_country("cig", combined_samples, has_age_cohort = TRUE)
+  smkextra_samples_full <- extract_head_samples_country("smkextra", combined_samples, has_age_cohort = FALSE)
+  anyextra_samples_full <- extract_head_samples_country("anyextra", combined_samples, has_age_cohort = FALSE)
+  def_code_shared_full  <- combined_samples[, "cig_def_code_shared"]
+
+  # ============================================================
+  # [OPT-4] Pre-subset to sampled_indices ONCE (avoids repeated indexing)
+  # ============================================================
+  n_samples <- min(1000, nrow(combined_samples))
+  sampled_indices <- sort(sample(1:nrow(combined_samples), n_samples))
+
+  cig_int_s          <- cig_samples_full$intercept[sampled_indices]
+  cig_age_spline_s   <- cig_samples_full$age_spline[sampled_indices, , drop = FALSE]
+  cig_age_lin_s      <- cig_samples_full$age_linear[sampled_indices]
+  cig_cohort_s       <- cig_samples_full$cohort_spline[sampled_indices, , drop = FALSE]
+  cig_ac_s           <- cig_samples_full$age_cohort[sampled_indices, , drop = FALSE]
+
+  smk_int_s          <- smkextra_samples_full$intercept[sampled_indices]
+  smk_age_spline_s   <- smkextra_samples_full$age_spline[sampled_indices, , drop = FALSE]
+  smk_age_lin_s      <- smkextra_samples_full$age_linear[sampled_indices]
+  smk_cohort_s       <- smkextra_samples_full$cohort_spline[sampled_indices, , drop = FALSE]
+
+  any_int_s          <- anyextra_samples_full$intercept[sampled_indices]
+  any_age_spline_s   <- anyextra_samples_full$age_spline[sampled_indices, , drop = FALSE]
+  any_age_lin_s      <- anyextra_samples_full$age_linear[sampled_indices]
+  any_cohort_s       <- anyextra_samples_full$cohort_spline[sampled_indices, , drop = FALSE]
+
+  def_shared_s       <- def_code_shared_full[sampled_indices]
+
+  # Free full sample matrices (no longer needed)
+  rm(cig_samples_full, smkextra_samples_full, anyextra_samples_full,
+     def_code_shared_full, combined_samples)
+
+  # ============================================================
+  # [OPT-6] PRECOMPUTE COHORT SPLINES FOR ALL YEARS
+  # ============================================================
+
+  min_year <- min(country_data$year)
+  max_year <- target_year + PROJECTED_YEARS
+  years_pred <- seq(min_year, max_year, by = 1)
+  n_years <- length(years_pred)
+
+  # All birth cohorts flattened: (n_years * n_ages) length
+  all_birth_cohorts <- rep(years_pred, each = n_ages) -
+    rep(age_midpoints_shared, times = n_years)
+
+  # Single ns() call for all cohorts
+  all_cohort_spline_mat <- as.matrix(ns(
+    all_birth_cohorts,
+    knots = regional_info$cohort_spline_knots,
+    Boundary.knots = regional_info$cohort_spline_boundary
+  ))
+  nCohortSpline_pred <- ncol(all_cohort_spline_mat)
+
+  # [OPT-3] Vectorized tensor product for all years
+  nA <- nAgeSpline_shared
+  nC <- nCohortSpline_pred
+  n_int <- nA * nC
+
+  # Pre-allocate storage indexed by year
+  cohort_spline_by_year <- vector("list", n_years)
+  interaction_by_year   <- vector("list", n_years)
+  names(cohort_spline_by_year) <- as.character(years_pred)
+  names(interaction_by_year)   <- as.character(years_pred)
+
+  for (y_idx in 1:n_years) {
+    row_start <- (y_idx - 1) * n_ages + 1
+    row_end   <- y_idx * n_ages
+    cohort_mat <- all_cohort_spline_mat[row_start:row_end, , drop = FALSE]
+    cohort_spline_by_year[[y_idx]] <- cohort_mat
+
+    # Build tensor product: n_ages x (nA * nC)
+    int_mat <- matrix(0, n_ages, n_int)
+    for (m in 1:nC) {
+      col_start <- (m - 1) * nA + 1
+      col_end   <- m * nA
+      int_mat[, col_start:col_end] <- age_spline_mat_shared * cohort_mat[, m]
+    }
+    interaction_by_year[[y_idx]] <- int_mat
+  }
+
+  rm(all_cohort_spline_mat, all_birth_cohorts)
+
+  # ============================================================
+  # [OPT-4] VECTORIZED PREDICTION LOOP
+  # ============================================================
+  def_codes    <- c("daily_user", "current_user")
+  def_binaries <- c(0, 1)
+
+  results_list <- list()
+
+  for (y_idx in 1:n_years) {
+    current_year <- years_pred[y_idx]
+    cohort_mat   <- cohort_spline_by_year[[y_idx]]
+    int_mat      <- interaction_by_year[[y_idx]]
+    birth_cohorts_year <- current_year - age_midpoints_shared
+
+    for (d_idx in 1:2) {
+      current_def     <- def_codes[d_idx]
+      def_code_binary <- def_binaries[d_idx]
+
+      cig_dir    <- file.path(country_dir, paste0(current_def, "_cigarettes"))
+      smoked_dir <- file.path(country_dir, paste0(current_def, "_any_smoked_tobacco"))
+      any_dir    <- file.path(country_dir, paste0(current_def, "_any_tobacco_product"))
+
+      dir.create(cig_dir, showWarnings = FALSE)
+      dir.create(smoked_dir, showWarnings = FALSE)
+      dir.create(any_dir, showWarnings = FALSE)
+
+      # ============================================================
+      # VECTORIZED PREDICTION (full matrix algebra)
+      # All operations produce n_ages x n_samples matrices.
+      # ============================================================
+
+      # CIG: Full model with age-cohort interactions
+      mu_cig <- ones_ages %o% cig_int_s +
+        def_code_binary * (ones_ages %o% def_shared_s) +
+        (age_spline_mat_shared %*% t(cig_age_spline_s)) * spline_weight_shared +
+        outer(linear_age_product_shared, cig_age_lin_s) +
+        cohort_mat %*% t(cig_cohort_s) +
+        int_mat %*% t(cig_ac_s)
+
+      # SMKEXTRA: NO age-cohort interactions (0.3x def code scaling)
+      mu_smkextra <- ones_ages %o% smk_int_s +
+        (0.3 * def_code_binary) * (ones_ages %o% def_shared_s) +
+        (age_spline_mat_shared %*% t(smk_age_spline_s)) * spline_weight_shared +
+        outer(linear_age_product_shared, smk_age_lin_s) +
+        cohort_mat %*% t(smk_cohort_s)
+
+      # ANYEXTRA: NO age-cohort interactions (0.3x def code scaling)
+      mu_anyextra <- ones_ages %o% any_int_s +
+        (0.3 * def_code_binary) * (ones_ages %o% def_shared_s) +
+        (age_spline_mat_shared %*% t(any_age_spline_s)) * spline_weight_shared +
+        outer(linear_age_product_shared, any_age_lin_s) +
+        cohort_mat %*% t(any_cohort_s)
+
+      # STICK-BREAKING CONSTRUCTION (element-wise, all n_ages x n_samples)
+      p_cig    <- plogis(mu_cig)
+      p_smoked <- p_cig + plogis(mu_smkextra) * (1 - p_cig)
+      p_any    <- p_smoked + plogis(mu_anyextra) * (1 - p_smoked)
+
+      # Convert to logit scale for storage
+      predictions_cig    <- mu_cig
+      predictions_smoked <- log(p_smoked / (1 - p_smoked))
+      predictions_any    <- log(p_any / (1 - p_any))
+
+      # Check ordering constraints
+      has_violations <- check_ordering_per_draw(predictions_cig, predictions_smoked, predictions_any)
+      if (has_violations) {
+        warning(sprintf("Ordering violations: %s, %s, year %d", country_code, current_def, current_year))
+      }
+
+      # Save prediction matrices (logit scale, n_ages x n_samples)
+      saveRDS(predictions_cig, file = file.path(cig_dir, paste0(current_year, ".rds")), compress = TRUE)
+      saveRDS(predictions_smoked, file = file.path(smoked_dir, paste0(current_year, ".rds")), compress = TRUE)
+      saveRDS(predictions_any, file = file.path(any_dir, paste0(current_year, ".rds")), compress = TRUE)
+
+      # ============================================================
+      # [OPT-5] VECTORIZED SUMMARY STATISTICS
+      # Use rowMeans instead of apply(..., mean) for ~5x speedup.
+      # ============================================================
+
+      summarise_predictions <- function(p_matrix) {
+        ci <- t(apply(p_matrix, 1, quantile, probs = c(0.025, 0.975)))
+        data.frame(
+          Prevalence = rowMeans(p_matrix),
+          lower_ci   = ci[, 1],
+          upper_ci   = ci[, 2]
+        )
+      }
+
+      base_df <- data.frame(
+        Year         = current_year,
+        Age_Midpoint = age_midpoints_shared,
+        Birth_Cohort = birth_cohorts_year,
+        Def_Code_Binary = def_code_binary,
+        Def_Code     = current_def
+      )
+
+      # Cigarettes
+      cig_summary <- summarise_predictions(p_cig)
+      results_list[[length(results_list) + 1]] <- cbind(
+        base_df, cig_summary,
+        Def_Type_Code = paste0(current_def, "_cigarettes")
+      )
+
+      # Any smoked tobacco
+      smoked_summary <- summarise_predictions(p_smoked)
+      results_list[[length(results_list) + 1]] <- cbind(
+        base_df, smoked_summary,
+        Def_Type_Code = paste0(current_def, "_any_smoked_tobacco")
+      )
+
+      # Any tobacco
+      any_summary <- summarise_predictions(p_any)
+      results_list[[length(results_list) + 1]] <- cbind(
+        base_df, any_summary,
+        Def_Type_Code = paste0(current_def, "_any_tobacco_product")
+      )
+
+      # Free intermediate matrices
+      rm(mu_cig, mu_smkextra, mu_anyextra,
+         p_cig, p_smoked, p_any,
+         predictions_cig, predictions_smoked, predictions_any)
+    }
+  }
+
+  # Free precomputed year-specific matrices
+  rm(cohort_spline_by_year, interaction_by_year)
+
+  # Combine results
+  result         <- do.call(rbind, results_list)
+  result$Country <- country_code
+  result$Sex     <- gender
+
+  prediction_results <- result %>% select(
+    Year, Age_Midpoint, Birth_Cohort, Def_Type_Code,
+    Sex, Country, Prevalence, lower_ci, upper_ci
+  )
+
+  write.csv(prediction_results, file = file.path(country_dir, "predictions.csv"), row.names = FALSE)
+
+  # No cleanup needed: subprocess exit releases all DLLs and reclaims memory.
+  return(list(success = TRUE))
+}
+
+
+# ============================================================
+# MAIN SCRIPT: Launch subprocesses for each country
+# ============================================================
+
 cat("\n================================================================\n")
 cat("  FITTING COUNTRY-SPECIFIC MODELS (NIMBLE)\n")
+cat("  Using subprocess isolation (callr) for DLL management\n")
 cat("================================================================\n")
 
 if (!dir.exists("results/country_specific_ac_nested")) {
@@ -82,577 +686,85 @@ for (gender in genders) {
   cat(sprintf("  Precomputed shared age components: %d ages, %d spline bases\n",
               n_ages, nAgeSpline_shared))
 
+  # ============================================================
+  # SAVE SHARED DATA FOR SUBPROCESS ISOLATION
+  #
+  # All data shared across countries (config, age components,
+  # regional info, full dataset, model code) is saved to a
+  # temporary RDS file. Each subprocess reads this file once
+  # instead of having the data serialized per-call.
+  # ============================================================
+
+  shared_data <- list(
+    # Config constants
+    RANDOM_SEED          = RANDOM_SEED,
+    NUMBER_OF_CHAINS     = NUMBER_OF_CHAINS,
+    NUMBER_OF_BURN       = NUMBER_OF_BURN,
+    NUMBER_OF_ITERATIONS = NUMBER_OF_ITERATIONS,
+    THINNING_INTERVAL    = THINNING_INTERVAL,
+    target_year          = target_year,
+    PROJECTED_YEARS      = PROJECTED_YEARS,
+
+    # Regional and dataset
+    regional_info        = regional_info,
+    clean_data           = clean_data,
+    country_name_mapping = country_name_mapping,
+    model_code           = regional_country_specific_ac_model_nimble,
+
+    # Precomputed age components
+    age_midpoints_shared       = age_midpoints_shared,
+    n_ages                     = n_ages,
+    spline_weight_shared       = spline_weight_shared,
+    linear_weight_shared       = linear_weight_shared,
+    linear_age_product_shared  = linear_age_product_shared,
+    age_spline_mat_shared      = age_spline_mat_shared,
+    nAgeSpline_shared          = nAgeSpline_shared,
+    ones_ages                  = ones_ages,
+    gender_dir                 = gender_dir
+  )
+
+  shared_file <- tempfile(pattern = "who_shared_", fileext = ".rds")
+  saveRDS(shared_data, shared_file)
+  rm(shared_data)
+  cat(sprintf("  Shared data saved to: %s\n", basename(shared_file)))
+
   countries <- list.files(file.path("country_priors", gender), pattern = "_regional_ac_priors_nested.csv")
   countries <- sub("_regional_ac_priors_nested.csv", "", countries)
 
-  for (country_code in countries) {
+  n_countries <- length(countries)
+  cat(sprintf("  Countries to fit: %d\n", n_countries))
+
+  for (i in seq_along(countries)) {
+    country_code <- countries[i]
     country_full_name <- country_name_mapping[country_code]
-    cat(sprintf("  %s\n", country_full_name))
+    cat(sprintf("  [%d/%d] %s\n", i, n_countries, country_full_name))
 
-    country_dir <- file.path(gender_dir, country_full_name)
-    dir.create(country_dir, showWarnings = FALSE)
-
-    priors_file <- file.path("country_priors", gender, paste0(country_code, "_regional_ac_priors_nested.csv"))
-
-    if (!file.exists(priors_file)) {
-      warning(sprintf("No priors for %s, %s", country_code, gender))
-      next
-    }
-
-    priors_df <- read.csv(priors_file)
-
-    # Helper function to get prior values
-    get_prior <- function(param_name) {
-      row <- priors_df[priors_df$parameter == param_name, ]
-      if (nrow(row) == 0) return(list(mean = 0, sd = 1))
-      list(mean = row$mean, sd = max(row$sd, 1e-6))
-    }
-
-    # Helper function to convert SD to precision safely
-    sd_to_prec <- function(sd_val) {
-      sd_safe <- pmax(sd_val, 0.01)  # Minimum SD = 0.01
-      prec <- 1 / (sd_safe^2)
-      return(pmin(prec, 10000))  # Maximum precision = 10000
-    }
-
-    # Filter country data
-    country_data <- clean_data %>%
-      filter(wb_country_abv == country_code, sex == gender)
-
-    if (nrow(country_data) == 0) {
+    # Pre-check: skip if no data (avoids subprocess startup overhead)
+    has_data <- any(clean_data$wb_country_abv == country_code & clean_data$sex == gender)
+    if (!has_data) {
       warning(sprintf("No data for %s, %s", country_code, gender))
       next
     }
 
-    country_data <- country_data %>%
-      mutate(
-        Num_Survey = as.numeric(factor(survey)),
-        Num_Year   = as.numeric(year),
-        age_range  = end_age - start_age,
-        weight     = 1 / (age_range + 1),
-        weight     = weight / mean(weight)
-      )
-
-    # ---- Prepare NIMBLE Constants for Country-Specific Model ----
-
-    nAgeSpline <- ncol(country_data[, grep("^age_spline_", names(country_data))])
-    nCohortSpline <- ncol(country_data[, grep("^cohort_spline_", names(country_data))])
-    nAgeXCohortSplines <- ncol(country_data[, grep("^age_cohort_", names(country_data))])
-    nSurvey <- length(unique(country_data$Num_Survey))
-
-    # Extract prior vectors with proper ordering
-    get_prior_vector <- function(prefix, n) {
-      means <- numeric(n)
-      sds <- numeric(n)
-      for (i in 1:n) {
-        param_name <- paste0(prefix, i)
-        row <- which(priors_df$parameter == param_name)
-        if (length(row) == 1) {
-          means[i] <- priors_df$mean[row]
-          sds[i] <- priors_df$sd[row]
-        } else {
-          means[i] <- 0
-          sds[i] <- 1
-        }
-      }
-      list(means = means, sds = sds)
-    }
-
-    cig_age_spline_priors <- get_prior_vector("cig_age_spline_", nAgeSpline)
-    cig_cohort_spline_priors <- get_prior_vector("cig_cohort_spline_", nCohortSpline)
-    cig_age_cohort_priors <- get_prior_vector("cig_age_cohort_interaction_", nAgeXCohortSplines)
-
-    smkextra_age_spline_priors <- get_prior_vector("smkextra_age_spline_", nAgeSpline)
-    smkextra_cohort_spline_priors <- get_prior_vector("smkextra_cohort_spline_", nCohortSpline)
-
-    anyextra_age_spline_priors <- get_prior_vector("anyextra_age_spline_", nAgeSpline)
-    anyextra_cohort_spline_priors <- get_prior_vector("anyextra_cohort_spline_", nCohortSpline)
-
-    # ---- Prepare NIMBLE Data ----
-
-    # CORRECTED: No smkextra/anyextra age-cohort constants
-    nimble_constants_country <- list(
-      N = nrow(country_data),
-      nSurvey = nSurvey,
-      nAgeSpline = nAgeSpline,
-      nCohortSpline = nCohortSpline,
-      nAgeXCohortSplines = nAgeXCohortSplines,
-      Survey = as.integer(country_data$Num_Survey),
-
-      # CIG priors
-      cig_def_code_shared_prior_mean = get_prior("cig_def_code_shared")$mean,
-      cig_def_code_shared_prior_prec = sd_to_prec(get_prior("cig_def_code_shared")$sd),
-
-      cig_intercept_prior_mean = get_prior("cig_intercept")$mean,
-      cig_intercept_prior_prec = sd_to_prec(get_prior("cig_intercept")$sd),
-
-      cig_age_linear_smooth_effect_prior_mean = get_prior("cig_age_linear_smooth_effect")$mean,
-      cig_age_linear_smooth_effect_prior_prec = sd_to_prec(get_prior("cig_age_linear_smooth_effect")$sd),
-
-      # CIG spline priors (using ordered extraction)
-      cig_age_spline_prior_means = cig_age_spline_priors$means,
-      cig_age_spline_prior_precs = sd_to_prec(cig_age_spline_priors$sds),
-
-      cig_cohort_spline_prior_means = cig_cohort_spline_priors$means,
-      cig_cohort_spline_prior_precs = sd_to_prec(cig_cohort_spline_priors$sds),
-
-      cig_age_cohort_prior_means = cig_age_cohort_priors$means,
-      cig_age_cohort_prior_precs = sd_to_prec(cig_age_cohort_priors$sds),
-
-      # SMKEXTRA priors (NO age-cohort)
-      smkextra_intercept_prior_mean = get_prior("smkextra_intercept")$mean,
-      smkextra_intercept_prior_prec = sd_to_prec(get_prior("smkextra_intercept")$sd),
-
-      smkextra_age_linear_smooth_effect_prior_mean = get_prior("smkextra_age_linear_smooth_effect")$mean,
-      smkextra_age_linear_smooth_effect_prior_prec = sd_to_prec(get_prior("smkextra_age_linear_smooth_effect")$sd),
-
-      # SMKEXTRA spline priors (using ordered extraction)
-      smkextra_age_spline_prior_means = smkextra_age_spline_priors$means,
-      smkextra_age_spline_prior_precs = sd_to_prec(smkextra_age_spline_priors$sds),
-
-      smkextra_cohort_spline_prior_means = smkextra_cohort_spline_priors$means,
-      smkextra_cohort_spline_prior_precs = sd_to_prec(smkextra_cohort_spline_priors$sds),
-
-      # ANYEXTRA priors (NO age-cohort)
-      anyextra_intercept_prior_mean = get_prior("anyextra_intercept")$mean,
-      anyextra_intercept_prior_prec = sd_to_prec(get_prior("anyextra_intercept")$sd),
-
-      anyextra_age_linear_smooth_effect_prior_mean = get_prior("anyextra_age_linear_smooth_effect")$mean,
-      anyextra_age_linear_smooth_effect_prior_prec = sd_to_prec(get_prior("anyextra_age_linear_smooth_effect")$sd),
-
-      # ANYEXTRA spline priors (using ordered extraction)
-      anyextra_age_spline_prior_means = anyextra_age_spline_priors$means,
-      anyextra_age_spline_prior_precs = sd_to_prec(anyextra_age_spline_priors$sds),
-
-      anyextra_cohort_spline_prior_means = anyextra_cohort_spline_priors$means,
-      anyextra_cohort_spline_prior_precs = sd_to_prec(anyextra_cohort_spline_priors$sds)
-    )
-
-    # DATA
-    nimble_data_country <- list(
-      Prevalence = country_data$prevalence,
-      Def_Code_Binary = country_data$def_code_binary,
-      Type_Cig = country_data$Type_Cig,
-      Type_Smoked = country_data$Type_Smoked,
-      Type_Any = country_data$Type_Any,
-      age_spline_matrix = as.matrix(country_data[, grep("^age_spline_", names(country_data))]),
-      cohort_spline_matrix = as.matrix(country_data[, grep("^cohort_spline_", names(country_data))]),
-      age_cohort_interaction_matrix = as.matrix(country_data[, grep("^age_cohort_", names(country_data))]),
-      age_linear_smooth = country_data$age_linear_smooth,
-      spline_weight_var = country_data$spline_weight_var,
-      linear_weight_var = country_data$linear_weight_var,
-      weight = country_data$weight
-    )
-
-    # ---- Generate Initial Values ----
-
-    generate_country_inits <- function(seed_offset = 0) {
-      set.seed(RANDOM_SEED + seed_offset)
-      list(
-        cig_def_code_shared = rnorm(1, get_prior("cig_def_code_shared")$mean, 0.1),
-        cig_intercept = rnorm(1, get_prior("cig_intercept")$mean, 0.2),
-        smkextra_intercept = rnorm(1, get_prior("smkextra_intercept")$mean, 0.2),
-        anyextra_intercept = rnorm(1, get_prior("anyextra_intercept")$mean, 0.2),
-        cig_age_linear_smooth_effect = runif(1, -0.05, -0.01),
-        smkextra_age_linear_smooth_effect = runif(1, -0.05, -0.01),
-        anyextra_age_linear_smooth_effect = runif(1, -0.05, -0.01),
-        residual_sd = runif(1, 0.5, 1.0),
-        survey_intercept_precision = rgamma(1, 3, 1),
-        survey_intercept = rnorm(nSurvey, 0, 0.1),
-        # CIG spline arrays (using ordered prior means)
-        cig_age_spline = rnorm(nAgeSpline, cig_age_spline_priors$means, 0.05),
-        cig_cohort_spline = rnorm(nCohortSpline, cig_cohort_spline_priors$means, 0.05),
-        cig_age_cohort_interaction = rnorm(nAgeXCohortSplines, cig_age_cohort_priors$means, 0.02),
-
-        # SMKEXTRA spline arrays (NO age-cohort)
-        smkextra_age_spline = rnorm(nAgeSpline, smkextra_age_spline_priors$means, 0.05),
-        smkextra_cohort_spline = rnorm(nCohortSpline, smkextra_cohort_spline_priors$means, 0.05),
-
-        # ANYEXTRA spline arrays (NO age-cohort)
-        anyextra_age_spline = rnorm(nAgeSpline, anyextra_age_spline_priors$means, 0.05),
-        anyextra_cohort_spline = rnorm(nCohortSpline, anyextra_cohort_spline_priors$means, 0.05)
-      )
-    }
-
-    inits_list <- lapply(1:NUMBER_OF_CHAINS, function(i) generate_country_inits(i))
-
-    # ---- Fit Country Model ----
-
     tryCatch({
-      nimble_model <- nimbleModel(
-        code = regional_country_specific_ac_model_nimble,
-        constants = nimble_constants_country,
-        data = nimble_data_country,
-        inits = inits_list[[1]],
-        name = paste0("CountryModel_", country_code, "_", gender)
-      )
-
-      # Check for uninitialized nodes
-      uninit_nodes <- nimble_model$initializeInfo()$uninitializedNodes
-      if (length(uninit_nodes) > 0) {
-        cat(sprintf("    WARNING: Uninitialized nodes: %s\n",
-                    paste(head(uninit_nodes, 5), collapse = ", ")))
-      }
-
-      # Calculate initial log probability
-      init_logprob <- try(nimble_model$calculate(), silent = TRUE)
-      if (inherits(init_logprob, "try-error") || !is.finite(init_logprob)) {
-        cat(sprintf("    WARNING: Initial logProb is invalid: %s\n", init_logprob))
-        node_logprobs <- sapply(nimble_model$getNodeNames(stochOnly = TRUE), function(n) {
-          tryCatch(nimble_model$calculate(n), error = function(e) NA)
-        })
-        bad_nodes <- names(node_logprobs)[!is.finite(node_logprobs)]
-        if (length(bad_nodes) > 0) {
-          cat(sprintf("    Problematic nodes: %s\n", paste(head(bad_nodes, 10), collapse = ", ")))
-        }
-      } else {
-        cat(sprintf("    Initial logProb: %.2f\n", init_logprob))
-      }
-
-      # CORRECTED: Monitors - no smkextra/anyextra age-cohort
-      mcmc_config <- configureMCMC(
-        nimble_model,
-        monitors = c(
-          "cig_def_code_shared",
-          "cig_intercept", "cig_age_spline", "cig_age_linear_smooth_effect",
-          "cig_cohort_spline", "cig_age_cohort_interaction",
-          "smkextra_intercept", "smkextra_age_spline", "smkextra_age_linear_smooth_effect",
-          "smkextra_cohort_spline",
-          "anyextra_intercept", "anyextra_age_spline", "anyextra_age_linear_smooth_effect",
-          "anyextra_cohort_spline",
-          "residual_sd"
+      callr::r(
+        func = fit_single_country_model,
+        args = list(
+          country_code = country_code,
+          gender = gender,
+          shared_data_path = shared_file
         ),
-        thin = THINNING_INTERVAL,
-        enableWAIC = FALSE,
-        useConjugacy = FALSE
+        show = TRUE,
+        timeout = 7200  # 2 hours per country
       )
-
-      mcmc_built <- buildMCMC(mcmc_config)
-      compiled_model <- compileNimble(nimble_model)
-      compiled_mcmc <- compileNimble(mcmc_built, project = nimble_model)
-
-      samples <- runMCMC(
-        compiled_mcmc,
-        niter = NUMBER_OF_BURN + NUMBER_OF_ITERATIONS,
-        nburnin = NUMBER_OF_BURN,
-        nchains = NUMBER_OF_CHAINS,
-        inits = inits_list,
-        thin = THINNING_INTERVAL,
-        samplesAsCodaMCMC = TRUE,
-        progressBar = FALSE,
-        summary = TRUE
-      )
-
-      combined_samples <- do.call(rbind, lapply(samples$samples, as.matrix))
-
-      # Check for NaN/Inf
-      n_invalid <- sum(!is.finite(combined_samples))
-      if (n_invalid > 0) {
-        cat(sprintf("    WARNING: %d non-finite values in samples\n", n_invalid))
-      }
-
-      # R-hat diagnostic
-      gelman_diag <- try({
-        param_vars <- apply(combined_samples, 2, var, na.rm = TRUE)
-        varying_params <- names(param_vars)[param_vars > 1e-10]
-        if (length(varying_params) > 0) {
-          samples_filtered <- lapply(samples$samples, function(s) s[, varying_params, drop = FALSE])
-          class(samples_filtered) <- "mcmc.list"
-          gelman.diag(samples_filtered, multivariate = FALSE)
-        } else NULL
-      }, silent = TRUE)
-
-      if (!inherits(gelman_diag, "try-error") && !is.null(gelman_diag)) {
-        max_rhat <- max(gelman_diag$psrf[, "Point est."], na.rm = TRUE)
-        if (is.finite(max_rhat)) {
-          cat(sprintf("    R-hat: %.3f %s\n", max_rhat,
-                      ifelse(max_rhat < 1.1, "(Good)", "(Check convergence)")))
-        }
-      }
-
-      # [MEM-OPT] Free raw MCMC samples immediately after diagnostics.
-      # Only combined_samples is needed from here on.
-      rm(samples)
-
-      saveRDS(combined_samples, file = file.path(country_dir, "posterior_samples.rds"), compress = TRUE)
-
-      # Extract samples for prediction
-      extract_head_samples_country <- function(prefix, combined_samples, has_age_cohort = FALSE) {
-        result <- list(
-          intercept     = combined_samples[, paste0(prefix, "_intercept")],
-          age_linear    = combined_samples[, paste0(prefix, "_age_linear_smooth_effect")],
-          age_spline    = combined_samples[, grep(paste0("^", prefix, "_age_spline\\["), colnames(combined_samples)), drop = FALSE],
-          cohort_spline = combined_samples[, grep(paste0("^", prefix, "_cohort_spline\\["), colnames(combined_samples)), drop = FALSE]
-        )
-        if (has_age_cohort) {
-          result$age_cohort <- combined_samples[, grep(paste0("^", prefix, "_age_cohort_interaction\\["), colnames(combined_samples)), drop = FALSE]
-        }
-        result
-      }
-
-      cig_samples_full      <- extract_head_samples_country("cig", combined_samples, has_age_cohort = TRUE)
-      smkextra_samples_full <- extract_head_samples_country("smkextra", combined_samples, has_age_cohort = FALSE)
-      anyextra_samples_full <- extract_head_samples_country("anyextra", combined_samples, has_age_cohort = FALSE)
-      def_code_shared_full  <- combined_samples[, "cig_def_code_shared"]
-
-      # ============================================================
-      # [OPT-4] Pre-subset to sampled_indices ONCE (avoids repeated indexing)
-      # ============================================================
-      n_samples <- min(1000, nrow(combined_samples))
-      sampled_indices <- sort(sample(1:nrow(combined_samples), n_samples))
-
-      cig_int_s          <- cig_samples_full$intercept[sampled_indices]
-      cig_age_spline_s   <- cig_samples_full$age_spline[sampled_indices, , drop = FALSE]
-      cig_age_lin_s      <- cig_samples_full$age_linear[sampled_indices]
-      cig_cohort_s       <- cig_samples_full$cohort_spline[sampled_indices, , drop = FALSE]
-      cig_ac_s           <- cig_samples_full$age_cohort[sampled_indices, , drop = FALSE]
-
-      smk_int_s          <- smkextra_samples_full$intercept[sampled_indices]
-      smk_age_spline_s   <- smkextra_samples_full$age_spline[sampled_indices, , drop = FALSE]
-      smk_age_lin_s      <- smkextra_samples_full$age_linear[sampled_indices]
-      smk_cohort_s       <- smkextra_samples_full$cohort_spline[sampled_indices, , drop = FALSE]
-
-      any_int_s          <- anyextra_samples_full$intercept[sampled_indices]
-      any_age_spline_s   <- anyextra_samples_full$age_spline[sampled_indices, , drop = FALSE]
-      any_age_lin_s      <- anyextra_samples_full$age_linear[sampled_indices]
-      any_cohort_s       <- anyextra_samples_full$cohort_spline[sampled_indices, , drop = FALSE]
-
-      def_shared_s       <- def_code_shared_full[sampled_indices]
-
-      # Free full sample matrices (no longer needed)
-      rm(cig_samples_full, smkextra_samples_full, anyextra_samples_full,
-         def_code_shared_full, combined_samples)
-
-      # ============================================================
-      # [OPT-6] PRECOMPUTE COHORT SPLINES FOR ALL YEARS
-      # ============================================================
-
-      min_year <- min(country_data$year)
-      max_year <- target_year + PROJECTED_YEARS
-      years_pred <- seq(min_year, max_year, by = 1)
-      n_years <- length(years_pred)
-
-      # All birth cohorts flattened: (n_years * n_ages) length
-      all_birth_cohorts <- rep(years_pred, each = n_ages) -
-        rep(age_midpoints_shared, times = n_years)
-
-      # Single ns() call for all cohorts
-      all_cohort_spline_mat <- as.matrix(ns(
-        all_birth_cohorts,
-        knots = regional_info$cohort_spline_knots,
-        Boundary.knots = regional_info$cohort_spline_boundary
-      ))
-      nCohortSpline_pred <- ncol(all_cohort_spline_mat)
-
-      # [OPT-3] Vectorized tensor product for all years
-      nA <- nAgeSpline_shared
-      nC <- nCohortSpline_pred
-      n_int <- nA * nC
-
-      # Pre-allocate storage indexed by year
-      cohort_spline_by_year <- vector("list", n_years)
-      interaction_by_year   <- vector("list", n_years)
-      names(cohort_spline_by_year) <- as.character(years_pred)
-      names(interaction_by_year)   <- as.character(years_pred)
-
-      for (y_idx in 1:n_years) {
-        row_start <- (y_idx - 1) * n_ages + 1
-        row_end   <- y_idx * n_ages
-        cohort_mat <- all_cohort_spline_mat[row_start:row_end, , drop = FALSE]
-        cohort_spline_by_year[[y_idx]] <- cohort_mat
-
-        # Build tensor product: n_ages x (nA * nC)
-        int_mat <- matrix(0, n_ages, n_int)
-        for (m in 1:nC) {
-          col_start <- (m - 1) * nA + 1
-          col_end   <- m * nA
-          int_mat[, col_start:col_end] <- age_spline_mat_shared * cohort_mat[, m]
-        }
-        interaction_by_year[[y_idx]] <- int_mat
-      }
-
-      rm(all_cohort_spline_mat, all_birth_cohorts)
-
-      # ============================================================
-      # [OPT-4] VECTORIZED PREDICTION LOOP
-      # ============================================================
-      def_codes    <- c("daily_user", "current_user")
-      def_binaries <- c(0, 1)
-
-      results_list <- list()
-
-      for (y_idx in 1:n_years) {
-        current_year <- years_pred[y_idx]
-        cohort_mat   <- cohort_spline_by_year[[y_idx]]
-        int_mat      <- interaction_by_year[[y_idx]]
-        birth_cohorts_year <- current_year - age_midpoints_shared
-
-        for (d in 1:2) {
-          current_def     <- def_codes[d]
-          def_code_binary <- def_binaries[d]
-
-          cig_dir    <- file.path(country_dir, paste0(current_def, "_cigarettes"))
-          smoked_dir <- file.path(country_dir, paste0(current_def, "_any_smoked_tobacco"))
-          any_dir    <- file.path(country_dir, paste0(current_def, "_any_tobacco_product"))
-
-          dir.create(cig_dir, showWarnings = FALSE)
-          dir.create(smoked_dir, showWarnings = FALSE)
-          dir.create(any_dir, showWarnings = FALSE)
-
-          # ============================================================
-          # VECTORIZED PREDICTION (full matrix algebra)
-          # All operations produce n_ages x n_samples matrices.
-          # ============================================================
-
-          # CIG: Full model with age-cohort interactions
-          mu_cig <- ones_ages %o% cig_int_s +
-            def_code_binary * (ones_ages %o% def_shared_s) +
-            (age_spline_mat_shared %*% t(cig_age_spline_s)) * spline_weight_shared +
-            outer(linear_age_product_shared, cig_age_lin_s) +
-            cohort_mat %*% t(cig_cohort_s) +
-            int_mat %*% t(cig_ac_s)
-
-          # SMKEXTRA: NO age-cohort interactions (0.3x def code scaling)
-          mu_smkextra <- ones_ages %o% smk_int_s +
-            (0.3 * def_code_binary) * (ones_ages %o% def_shared_s) +
-            (age_spline_mat_shared %*% t(smk_age_spline_s)) * spline_weight_shared +
-            outer(linear_age_product_shared, smk_age_lin_s) +
-            cohort_mat %*% t(smk_cohort_s)
-
-          # ANYEXTRA: NO age-cohort interactions (0.3x def code scaling)
-          mu_anyextra <- ones_ages %o% any_int_s +
-            (0.3 * def_code_binary) * (ones_ages %o% def_shared_s) +
-            (age_spline_mat_shared %*% t(any_age_spline_s)) * spline_weight_shared +
-            outer(linear_age_product_shared, any_age_lin_s) +
-            cohort_mat %*% t(any_cohort_s)
-
-          # STICK-BREAKING CONSTRUCTION (element-wise, all n_ages x n_samples)
-          p_cig    <- plogis(mu_cig)
-          p_smoked <- p_cig + plogis(mu_smkextra) * (1 - p_cig)
-          p_any    <- p_smoked + plogis(mu_anyextra) * (1 - p_smoked)
-
-          # Convert to logit scale for storage
-          predictions_cig    <- mu_cig
-          predictions_smoked <- log(p_smoked / (1 - p_smoked))
-          predictions_any    <- log(p_any / (1 - p_any))
-
-          # Check ordering constraints
-          has_violations <- check_ordering_per_draw(predictions_cig, predictions_smoked, predictions_any)
-          if (has_violations) {
-            warning(sprintf("Ordering violations: %s, %s, year %d", country_code, current_def, current_year))
-          }
-
-          # Save prediction matrices (logit scale, n_ages x n_samples)
-          saveRDS(predictions_cig, file = file.path(cig_dir, paste0(current_year, ".rds")), compress = TRUE)
-          saveRDS(predictions_smoked, file = file.path(smoked_dir, paste0(current_year, ".rds")), compress = TRUE)
-          saveRDS(predictions_any, file = file.path(any_dir, paste0(current_year, ".rds")), compress = TRUE)
-
-          # ============================================================
-          # [OPT-5] VECTORIZED SUMMARY STATISTICS
-          # Use rowMeans instead of apply(..., mean) for ~5x speedup.
-          # ============================================================
-
-          summarise_predictions <- function(p_matrix) {
-            ci <- t(apply(p_matrix, 1, quantile, probs = c(0.025, 0.975)))
-            data.frame(
-              Prevalence = rowMeans(p_matrix),
-              lower_ci   = ci[, 1],
-              upper_ci   = ci[, 2]
-            )
-          }
-
-          base_df <- data.frame(
-            Year         = current_year,
-            Age_Midpoint = age_midpoints_shared,
-            Birth_Cohort = birth_cohorts_year,
-            Def_Code_Binary = def_code_binary,
-            Def_Code     = current_def
-          )
-
-          # Cigarettes
-          cig_summary <- summarise_predictions(p_cig)
-          results_list[[length(results_list) + 1]] <- cbind(
-            base_df, cig_summary,
-            Def_Type_Code = paste0(current_def, "_cigarettes")
-          )
-
-          # Any smoked tobacco
-          smoked_summary <- summarise_predictions(p_smoked)
-          results_list[[length(results_list) + 1]] <- cbind(
-            base_df, smoked_summary,
-            Def_Type_Code = paste0(current_def, "_any_smoked_tobacco")
-          )
-
-          # Any tobacco
-          any_summary <- summarise_predictions(p_any)
-          results_list[[length(results_list) + 1]] <- cbind(
-            base_df, any_summary,
-            Def_Type_Code = paste0(current_def, "_any_tobacco_product")
-          )
-
-          # Free intermediate matrices
-          rm(mu_cig, mu_smkextra, mu_anyextra,
-             p_cig, p_smoked, p_any,
-             predictions_cig, predictions_smoked, predictions_any)
-        }
-      }
-
-      # Free precomputed year-specific matrices
-      rm(cohort_spline_by_year, interaction_by_year)
-
-      # Combine results
-      result         <- do.call(rbind, results_list)
-      result$Country <- country_code
-      result$Sex     <- gender
-
-      prediction_results <- result %>% select(
-        Year, Age_Midpoint, Birth_Cohort, Def_Type_Code,
-        Sex, Country, Prevalence, lower_ci, upper_ci
-      )
-
-      write.csv(prediction_results, file = file.path(country_dir, "predictions.csv"), row.names = FALSE)
-
-      # ============================================================
-      # [OPT-1] FIXED CLEANUP ORDER
-      #
-      # Original bug: clearCompiled(nimble_model) was called BEFORE
-      # saving a reference, then rm() was called, so clearCompiled
-      # always failed silently, leaking the compiled DLL. Over 360+
-      # iterations this caused progressive slowdown.
-      #
-      # Fix: Save reference, remove other objects, THEN clearCompiled.
-      # ============================================================
-
-      model_ref <- nimble_model  # Save reference before removing anything
-      rm(compiled_model, compiled_mcmc, mcmc_built, results_list,
-         cig_int_s, cig_age_spline_s, cig_age_lin_s, cig_cohort_s, cig_ac_s,
-         smk_int_s, smk_age_spline_s, smk_age_lin_s, smk_cohort_s,
-         any_int_s, any_age_spline_s, any_age_lin_s, any_cohort_s,
-         def_shared_s)
-      nimble::clearCompiled(model_ref)  # Now actually works - releases the DLL
-      rm(nimble_model, model_ref)
-      gc()
-
     }, error = function(e) {
       warning(sprintf("Error fitting country model for %s, %s: %s", country_code, gender, e$message))
       cat(sprintf("    ERROR: %s\n", e$message))
     })
-
-    # Safety net: release NIMBLE compiled objects after errors.
-    # On success these were already cleaned up inside tryCatch (OPT-1).
-    # On error they may linger and leak DLLs.
-    for (obj_name in c("nimble_model", "model_ref", "compiled_model",
-                       "compiled_mcmc", "mcmc_built")) {
-      if (exists(obj_name, inherits = FALSE)) {
-        if (obj_name %in% c("nimble_model", "model_ref")) {
-          try(nimble::clearCompiled(get(obj_name)), silent = TRUE)
-        }
-        try(rm(list = obj_name), silent = TRUE)
-      }
-    }
-    gc()
-
   }
+
+  # Clean up shared data file
+  unlink(shared_file)
 }
 
 # [MEM-OPT] Read back all country predictions from disk instead of growing list in RAM.
