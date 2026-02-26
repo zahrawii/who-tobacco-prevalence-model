@@ -1,0 +1,4 @@
+# NIMBLE compiles a C++ DLL per model. With 191 countries x 2 sexes = 382+ models,
+# R's default DLL limit (100 on Unix, ~300 on Windows) is insufficient.
+# This MUST be set here (not via Sys.setenv) because R reads it at startup.
+R_MAX_NUM_DLLS=1000

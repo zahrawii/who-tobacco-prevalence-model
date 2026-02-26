@@ -93,9 +93,15 @@ if (!exists("DIAGNOSTICS_AVAILABLE")) DIAGNOSTICS_AVAILABLE <- TRUE
 
 # ---- 1.2 NIMBLE Configuration ----
 
-# Increase max DLLs to prevent "maximal number of DLLs reached" error
-# when fitting 360+ country models (each NIMBLE model compiles to a DLL)
+# DLL limit for NIMBLE: set in .Renviron (R reads it at startup).
+# Sys.setenv is kept as fallback but does NOT work on Windows after R starts.
 Sys.setenv(R_MAX_NUM_DLLS = 1000)
+dll_limit <- as.integer(Sys.getenv("R_MAX_NUM_DLLS", "100"))
+cat(sprintf("  R_MAX_NUM_DLLS = %d (need ~800 for full pipeline)\n", dll_limit))
+if (dll_limit < 800) {
+  cat("  WARNING: DLL limit may be too low. Ensure .Renviron has R_MAX_NUM_DLLS=1000\n")
+  cat("  WARNING: and RESTART R (not just re-source) for it to take effect.\n")
+}
 
 nimbleOptions(verbose = FALSE)
 nimbleOptions(MCMCprogressBar = TRUE)

@@ -11,10 +11,18 @@
 #
 #########################################################################################
 
-# ---- CRITICAL: Increase DLL Limit BEFORE Loading NIMBLE ----
+# ---- CRITICAL: DLL Limit for NIMBLE ----
 # Each NIMBLE model compiles to a separate DLL. With 191 countries × 2 sexes = 382+ models,
-# we exceed R's default limit of 100. Must be set before loading nimble.
+# we exceed R's default limit. The actual limit is set in .Renviron (project root) because
+# R reads R_MAX_NUM_DLLS at startup — Sys.setenv() is too late on Windows.
+# This call is kept as a fallback for systems that support dynamic changes.
 Sys.setenv(R_MAX_NUM_DLLS = 1000)
+dll_limit <- as.integer(Sys.getenv("R_MAX_NUM_DLLS", "100"))
+cat(sprintf("  R_MAX_NUM_DLLS = %d (need ~800 for full pipeline)\n", dll_limit))
+if (dll_limit < 800) {
+  cat("  WARNING: DLL limit may be too low. Ensure .Renviron has R_MAX_NUM_DLLS=1000\n")
+  cat("  WARNING: and RESTART R (not just re-source) for it to take effect.\n")
+}
 
 # ---- Package Loading Function ----
 
