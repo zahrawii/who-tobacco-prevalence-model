@@ -794,3 +794,265 @@ write.csv(
 )
 
 cat("\nCountry-specific model fitting complete (NIMBLE)\n")
+
+#########################################################################################
+#           TARGET PREVALENCE CALCULATION (COUNTRY-SPECIFIC MODEL)
+#
+#   Corresponds to the second half of Section 9 in pipeline_monolith.R
+#   Calculates base-year weighted prevalence and target thresholds
+#   using the country-specific model predictions saved to disk.
+#
+#   Requires: weights_cleaned (from 04_utils.R),
+#             calculate_weighted_prevalence (from 04_utils.R),
+#             target_prevalence_df (from 06_run_global_model.R, Global-only)
+#   Outputs: Updates target_prevalence_df with Country model entries
+#########################################################################################
+
+cat("\nCalculating target prevalences for country-specific models...\n")
+
+num_cores <- detectCores() - 1
+cl <- makeCluster(num_cores)
+registerDoParallel(cl)
+clusterSetRNGStream(cl, iseed = RANDOM_SEED)
+clusterExport(cl, "calculate_weighted_prevalence")
+
+country_target_list_all <- list()
+
+for (gender in genders) {
+  cat(sprintf("  Target prevalences (Country model): %s\n", gender))
+
+  countries_country <- list.dirs(
+    file.path("results/country_specific_ac_nested", gender),
+    full.names = FALSE, recursive = FALSE
+  )
+
+  country_results <- foreach(
+    country = countries_country,
+    .packages = c("dplyr", "tidyr"),
+    .combine = rbind,
+    .errorhandling = 'remove'
+  ) %dopar% {
+
+    country_target_list <- list()
+    country_path <- file.path("results/country_specific_ac_nested", gender, country)
+    def_types <- list.dirs(country_path, full.names = FALSE, recursive = FALSE)
+    def_types <- def_types[grepl("(cigarettes|tobacco)", def_types)]
+
+    country_code <- names(country_name_mapping)[country_name_mapping == country]
+    if (length(country_code) == 0) country_code <- country
+
+    base_year_weights <- weights_cleaned %>%
+      filter(area == country_code, sex == gender, year == BASE_YEAR) %>%
+      arrange(age)
+
+    if (nrow(base_year_weights) == 0) return(NULL)
+
+    for (def_type in def_types) {
+      base_year_file <- file.path(country_path, def_type, paste0(BASE_YEAR, ".rds"))
+
+      if (!file.exists(base_year_file)) next
+
+      iterations_matrix_logit <- readRDS(base_year_file)
+
+      if (nrow(iterations_matrix_logit) != nrow(base_year_weights)) next
+
+      weighted_probs <- calculate_weighted_prevalence(
+        iterations_matrix_logit,
+        base_year_weights$weight
+      )
+
+      base_year_mean  <- mean(weighted_probs)
+      base_year_lower <- quantile(weighted_probs, 0.025)
+      base_year_upper <- quantile(weighted_probs, 0.975)
+
+      calculated_target_prevalence <- base_year_mean * (1 - REDUCTION_PERCENTAGE / 100)
+
+      base_record <- data.frame(
+        Sex               = gender,
+        Country           = country_code,
+        Def_Type_Code     = def_type,
+        BaseYear          = BASE_YEAR,
+        BaseYearPrevalence = base_year_mean,
+        BaseYearLower     = base_year_lower,
+        BaseYearUpper     = base_year_upper,
+        Model_Type        = "Country",
+        stringsAsFactors  = FALSE
+      )
+
+      # 30% Reduction Target
+      calculated_record <- base_record %>%
+        mutate(
+          TargetPrevalence    = calculated_target_prevalence,
+          ReductionPercentage = REDUCTION_PERCENTAGE,
+          TargetType          = "30% Reduction",
+          TargetValue         = paste0(REDUCTION_PERCENTAGE, "% reduction")
+        )
+
+      country_target_list[[length(country_target_list) + 1]] <- calculated_record
+
+      # Absolute Target
+      manual_record <- base_record %>%
+        mutate(
+          TargetPrevalence    = MANUAL_TARGET_PROPORTION,
+          ReductionPercentage = round((1 - MANUAL_TARGET_PROPORTION / base_year_mean) * 100, 1),
+          TargetType          = paste0(MANUAL_TARGET_PREVALENCE, "% Target"),
+          TargetValue         = paste0(MANUAL_TARGET_PREVALENCE, "% prevalence")
+        )
+
+      country_target_list[[length(country_target_list) + 1]] <- manual_record
+    }
+
+    if (length(country_target_list) > 0) {
+      return(do.call(rbind, country_target_list))
+    } else {
+      return(NULL)
+    }
+  }
+
+  country_target_list_all[[gender]] <- country_results
+}
+
+stopCluster(cl)
+
+# Merge country model targets into the existing target_prevalence_df (which has Global entries)
+country_targets <- do.call(rbind, country_target_list_all)
+if (!is.null(country_targets) && nrow(country_targets) > 0) {
+  rownames(country_targets) <- NULL
+  target_prevalence_df <- bind_rows(target_prevalence_df, country_targets)
+  cat(sprintf("  Added %d country model target entries to target_prevalence_df\n", nrow(country_targets)))
+} else {
+  cat("  WARNING: No country model target prevalences computed\n")
+}
+
+# Save combined targets
+write.csv(target_prevalence_df, file = "results/target_prevalences_dual_evaluation.csv", row.names = FALSE)
+cat("Target prevalence calculation complete (both models)\n")
+
+#########################################################################################
+#           WEIGHTED PREVALENCE TRENDS (COUNTRY-SPECIFIC MODEL)
+#
+#   Corresponds to Section 12 in pipeline_monolith.R
+#   Calculates population-weighted prevalence and target achievement probabilities
+#   using the country-specific model predictions saved to disk.
+#
+#   Requires: target_prevalence_df (from 06_run_global_model.R),
+#             weights_cleaned (from 04_utils.R),
+#             calculate_weighted_prevalence (from 04_utils.R)
+#   Outputs: final_weighted_results_country
+#########################################################################################
+
+cat("\nCalculating weighted prevalence trends for country-specific models...\n")
+
+num_cores <- detectCores() - 1
+cl <- makeCluster(num_cores)
+registerDoParallel(cl)
+clusterSetRNGStream(cl, iseed = RANDOM_SEED)
+clusterExport(cl, "calculate_weighted_prevalence")
+
+gender_weighted_results_country <- list()
+
+for (gender in genders) {
+  cat(sprintf("Processing weighted calculations (Country-specific model): %s\n", gender))
+
+  country_dirs <- list.dirs(
+    file.path("results/country_specific_ac_nested", gender),
+    full.names = FALSE, recursive = FALSE
+  )
+
+  weighted_results <- foreach(
+    country = country_dirs,
+    .packages = c("dplyr", "tidyr"),
+    .combine = rbind,
+    .errorhandling = 'remove'
+  ) %dopar% {
+
+    country_path <- file.path("results/country_specific_ac_nested", gender, country)
+    def_types <- list.dirs(country_path, full.names = FALSE, recursive = FALSE)
+    def_types <- def_types[grepl("(cigarettes|tobacco)", def_types)]
+
+    country_results <- list()
+
+    country_code <- names(country_name_mapping)[country_name_mapping == country]
+    if (length(country_code) == 0) country_code <- country
+
+    for (def_type in def_types) {
+      year_files <- list.files(file.path(country_path, def_type), pattern = "\\.rds$")
+      years <- as.numeric(sub("\\.rds$", "", year_files))
+
+      target_records <- target_prevalence_df %>%
+        filter(Sex == gender, Country == country_code, Def_Type_Code == def_type,
+               Model_Type == "Country")
+
+      if (nrow(target_records) == 0) next
+
+      for (year_filtered in years) {
+        year_weights <- weights_cleaned %>%
+          filter(area == country_code, sex == gender, year == year_filtered) %>%
+          arrange(age)
+
+        if (nrow(year_weights) == 0) next
+
+        iterations_matrix_logit <- readRDS(
+          file.path(country_path, def_type, paste0(year_filtered, ".rds"))
+        )
+
+        if (nrow(iterations_matrix_logit) != nrow(year_weights)) next
+
+        weighted_probs <- calculate_weighted_prevalence(
+          iterations_matrix_logit,
+          year_weights$weight
+        )
+
+        weighted_mean     <- mean(weighted_probs)
+        weighted_lower_ci <- quantile(weighted_probs, 0.025)
+        weighted_upper_ci <- quantile(weighted_probs, 0.975)
+
+        for (i in 1:nrow(target_records)) {
+          target_record <- target_records[i, ]
+
+          prob_achieving_target <- mean(weighted_probs < target_record$TargetPrevalence)
+
+          result_record <- data.frame(
+            Country              = country_code,
+            Sex                  = gender,
+            Year                 = year_filtered,
+            Def_Type_Code        = def_type,
+            weighted_mean        = weighted_mean,
+            weighted_lower_ci    = weighted_lower_ci,
+            weighted_upper_ci    = weighted_upper_ci,
+            target_prevalence    = target_record$TargetPrevalence,
+            prob_achieving_target = prob_achieving_target,
+            target_type          = target_record$TargetType,
+            target_value         = target_record$TargetValue,
+            reduction_percentage = target_record$ReductionPercentage,
+            Model_Type           = "Country",
+            stringsAsFactors     = FALSE
+          )
+
+          country_results[[length(country_results) + 1]] <- result_record
+        }
+      }
+    }
+
+    if (length(country_results) > 0) {
+      return(do.call(rbind, country_results))
+    } else {
+      return(NULL)
+    }
+  }
+
+  gender_weighted_results_country[[gender]] <- weighted_results
+}
+
+stopCluster(cl)
+
+final_weighted_results_country <- do.call(rbind, gender_weighted_results_country)
+rownames(final_weighted_results_country) <- NULL
+
+write.csv(
+  final_weighted_results_country,
+  file = "results/final_weighted_results_country_model.csv",
+  row.names = FALSE
+)
+
+cat("Country-specific model weighted calculations complete\n")
