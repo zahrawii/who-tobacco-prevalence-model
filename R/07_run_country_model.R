@@ -734,9 +734,18 @@ for (gender in genders) {
   n_countries <- length(countries)
   cat(sprintf("  Countries to fit: %d\n", n_countries))
 
+  n_skipped <- 0
   for (i in seq_along(countries)) {
     country_code <- countries[i]
     country_full_name <- country_name_mapping[country_code]
+
+    # Skip if predictions already exist on disk (enables resume after interruption)
+    country_pred_file <- file.path(gender_dir, country_full_name, "predictions.csv")
+    if (file.exists(country_pred_file)) {
+      n_skipped <- n_skipped + 1
+      next
+    }
+
     cat(sprintf("  [%d/%d] %s\n", i, n_countries, country_full_name))
 
     # Pre-check: skip if no data (avoids subprocess startup overhead)
@@ -761,6 +770,11 @@ for (gender in genders) {
       warning(sprintf("Error fitting country model for %s, %s: %s", country_code, gender, e$message))
       cat(sprintf("    ERROR: %s\n", e$message))
     })
+  }
+
+  if (n_skipped > 0) {
+    cat(sprintf("  Skipped %d/%d countries with existing predictions on disk\n", n_skipped, n_countries))
+    cat("  (Delete results/country_specific_ac_nested/ to force re-fitting)\n")
   }
 
   # Clean up shared data file
