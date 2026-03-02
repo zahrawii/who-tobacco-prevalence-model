@@ -23,7 +23,7 @@ cat("
 #########################################################################
 #
 #              WHO TOBACCO CONTROL PREVALENCE PROJECTION
-#                     MODULAR VERSION 2.3.2
+#                     MODULAR VERSION 2.3.3
 #
 #########################################################################
 ")
@@ -155,10 +155,60 @@ run_modular_pipeline <- function(phases = c("prep", "global", "country", "eval",
   if ("viz" %in% phases) {
     cat("\n======= PHASE 6: Visualization =======\n")
 
+    # Load checkpoint if needed
+    if (!exists("final_weighted_results_selected")) {
+      if (file.exists("checkpoints/phase5_agg.RData")) {
+        load("checkpoints/phase5_agg.RData")
+      } else {
+        stop("Phase 5 must be run first.")
+      }
+    }
+
     source("R/10_visualization.R")
 
-    # Generate all plots
+    # Generate all basic/exploratory plots
     generate_all_visualizations()
+
+    # ---- Publication Tables ----
+    cat("\n  Generating publication tables...\n")
+    tryCatch({
+      if (file.exists("R/publication_tables.R")) {
+        source("R/publication_tables.R")
+      } else if (file.exists("R/11_publication_tables.R")) {
+        source("R/11_publication_tables.R")
+      } else {
+        cat("  WARNING: publication_tables.R not found. Skipping.\n")
+      }
+    }, error = function(e) {
+      cat(sprintf("  WARNING: Publication tables failed: %s\n", e$message))
+      cat("  Continuing with pipeline...\n")
+    })
+
+    # ---- Publication Figures ----
+    cat("\n  Generating publication figures...\n")
+    tryCatch({
+      if (file.exists("R/12_publication_figures.R")) {
+        source("R/12_publication_figures.R")
+      } else {
+        cat("  WARNING: R/12_publication_figures.R not found.\n")
+      }
+    }, error = function(e) {
+      cat(sprintf("  WARNING: Publication figures failed: %s\n", e$message))
+      cat("  Continuing with pipeline...\n")
+    })
+
+    # ---- Strata-Level Figures ----
+    cat("\n  Generating strata-level figures...\n")
+    tryCatch({
+      if (file.exists("R/13_strata_figures.R")) {
+        source("R/13_strata_figures.R")
+      } else {
+        cat("  WARNING: R/13_strata_figures.R not found.\n")
+      }
+    }, error = function(e) {
+      cat(sprintf("  WARNING: Strata figures failed: %s\n", e$message))
+      cat("  Continuing with pipeline...\n")
+    })
 
     cat("\nPhase 6 complete. Visualizations generated.\n")
   }
