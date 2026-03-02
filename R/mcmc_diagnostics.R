@@ -136,9 +136,6 @@ classify_parameter_group <- function(parameter) {
     grepl("^anyextra_age_spline_region_mean\\[", parameter) ~ "17_anyextra_regional_age_spline",
     grepl("^anyextra_cohort_spline_region_mean\\[", parameter) ~ "18_anyextra_regional_cohort_spline",
 
-    # Age-cohort interactions
-    grepl("^cig_age_cohort_interaction\\[", parameter) ~ "19_cig_age_cohort_interaction",
-
     # Linear effects
     grepl("_age_linear_smooth_effect", parameter) ~ "20_linear_age_effects",
 

@@ -2,7 +2,7 @@
 #
 #                    WHO TOBACCO CONTROL PREVALENCE PROJECTION MODEL
 #                              00_config.R - Configuration
-#                                   VERSION 2.3.3
+#                                   VERSION 2.4.0
 #
 #   Contains: All constants, MCMC settings, and output directory structure
 #   Source this file first before any other module
@@ -65,8 +65,8 @@ nimbleOptions(buildInterfacesForCompiledNestedNimbleFunctions = FALSE)
 
 NUMBER_OF_CHAINS     <- 4
 NUMBER_OF_ADAPT      <- 1000   # Informational only - NIMBLE handles adaptation internally
-NUMBER_OF_BURN       <- 5000
-NUMBER_OF_ITERATIONS <- 10000
+NUMBER_OF_BURN       <- 10000
+NUMBER_OF_ITERATIONS <- 30000
 THINNING_INTERVAL    <- 5
 
 # ---- Analysis Parameters ----
@@ -167,7 +167,7 @@ print_config <- function() {
 #########################################################################
 #
 #              WHO TOBACCO CONTROL PREVALENCE PROJECTION
-#                        VERSION 2.3.3 (NIMBLE)
+#                        VERSION 2.4.0 (NIMBLE)
 #
 #########################################################################
 

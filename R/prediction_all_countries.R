@@ -227,7 +227,6 @@ predict_single_country_all_heads <- function(country_code,
     spline_weight_value <- current_data$spline_weight_var[j]
     linear_weight_value <- current_data$linear_weight_var[j]
     cohort_spline_values <- as.numeric(current_data[j, grep("^cohort_spline_", names(current_data))])
-    age_cohort_interaction_values <- as.numeric(current_data[j, grep("^age_cohort_", names(current_data))])
 
     # ------------------------------------------------------------------
     # CIG: Full model with country-specific splines
@@ -238,8 +237,7 @@ predict_single_country_all_heads <- function(country_code,
       def_code_shared_samples * def_code_binary +
       spline_weight_value * as.matrix(cig_age_spline) %*% age_spline_values +
       linear_weight_value * cig_samples$age_linear_smooth * age_linear_smooth +
-      as.matrix(cig_cohort_spline) %*% cohort_spline_values +
-      as.matrix(cig_samples$age_cohort) %*% age_cohort_interaction_values
+      as.matrix(cig_cohort_spline) %*% cohort_spline_values
 
     # ------------------------------------------------------------------
     # SMKEXTRA: Country intercept + regional splines

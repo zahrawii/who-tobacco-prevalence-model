@@ -33,8 +33,6 @@ regional_hierarchical_global_ac_model_nimble <- nimbleCode({
       linear_weight_var[i] * cig_age_linear_smooth_effect * age_linear_smooth[i] +
       inprod(cig_cohort_spline[Country[i], 1:nCohortSpline],
              cohort_spline_matrix[i, 1:nCohortSpline]) +
-      inprod(cig_age_cohort_interaction[1:nAgeXCohortSplines],
-             age_cohort_interaction_matrix[i, 1:nAgeXCohortSplines]) +
       survey_intercept[Survey[i]]
 
     # ----------------------------------------------------------------
@@ -226,13 +224,6 @@ regional_hierarchical_global_ac_model_nimble <- nimbleCode({
     survey_intercept[s] ~ dnorm(0, sd = survey_intercept_sd)
   }
 
-  # ==================================================================
-  # AGE-COHORT INTERACTIONS (CIG ONLY - tighter prior)
-  # ==================================================================
-
-  for (k in 1:nAgeXCohortSplines) {
-    cig_age_cohort_interaction[k] ~ dnorm(0, sd = 0.2)
-  }
 })
 
 
@@ -252,8 +243,6 @@ regional_country_specific_ac_model_nimble <- nimbleCode({
       linear_weight_var[i] * cig_age_linear_smooth_effect * age_linear_smooth[i] +
       inprod(cig_cohort_spline[1:nCohortSpline],
              cohort_spline_matrix[i, 1:nCohortSpline]) +
-      inprod(cig_age_cohort_interaction[1:nAgeXCohortSplines],
-             age_cohort_interaction_matrix[i, 1:nAgeXCohortSplines]) +
       survey_intercept[Survey[i]]
 
     # Head 2: Other smoked (SIMPLIFIED - matches global model structure)
@@ -315,11 +304,6 @@ regional_country_specific_ac_model_nimble <- nimbleCode({
     cig_cohort_spline[m] ~ dnorm(cig_cohort_spline_prior_means[m],
                                  tau = cig_cohort_spline_prior_precs[m])
   }
-  for (k in 1:nAgeXCohortSplines) {
-    cig_age_cohort_interaction[k] ~ dnorm(cig_age_cohort_prior_means[k],
-                                          tau = cig_age_cohort_prior_precs[k])
-  }
-
   # ---- SMKEXTRA HEAD ----
   smkextra_intercept ~ dnorm(smkextra_intercept_prior_mean, tau = smkextra_intercept_prior_prec)
 
