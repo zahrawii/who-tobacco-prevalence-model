@@ -23,7 +23,7 @@ cat("
 #########################################################################
 #
 #              WHO TOBACCO CONTROL PREVALENCE PROJECTION
-#                     MODULAR VERSION 2.3.3
+#                     MODULAR VERSION 2.4.0
 #
 #########################################################################
 ")
@@ -189,6 +189,16 @@ run_modular_pipeline <- function(phases = c("prep", "global", "country", "eval",
     tryCatch({
       if (file.exists("R/12_publication_figures.R")) {
         source("R/12_publication_figures.R")
+        # Explicit call — the file's auto-execution depends on final_ac_predictions
+        # which may not be in the checkpoint. Call directly with available variables.
+        generate_all_figures(
+          clean_data = clean_data,
+          global_predictions = if (exists("final_ac_predictions")) final_ac_predictions else NULL,
+          country_predictions = if (exists("final_predictions_country_specific_ac")) final_predictions_country_specific_ac else NULL,
+          weighted_results = if (exists("final_weighted_results_selected")) final_weighted_results_selected else NULL,
+          country_region_mapping = if (exists("country_region_mapping")) country_region_mapping else NULL,
+          country_name_mapping = if (exists("country_name_mapping")) country_name_mapping else NULL
+        )
       } else {
         cat("  WARNING: R/12_publication_figures.R not found.\n")
       }
@@ -202,6 +212,13 @@ run_modular_pipeline <- function(phases = c("prep", "global", "country", "eval",
     tryCatch({
       if (file.exists("R/13_strata_figures.R")) {
         source("R/13_strata_figures.R")
+        # Explicit call — the file never auto-executes, only defines functions
+        generate_all_strata_figures(
+          clean_data = clean_data,
+          predictions = if (exists("final_ac_predictions")) final_ac_predictions else NULL,
+          trend_data = if (exists("final_weighted_results_selected")) final_weighted_results_selected else NULL,
+          country_name_mapping = if (exists("country_name_mapping")) country_name_mapping else NULL
+        )
       } else {
         cat("  WARNING: R/13_strata_figures.R not found.\n")
       }

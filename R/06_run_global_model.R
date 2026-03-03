@@ -290,6 +290,14 @@ for (gender in genders) {
       cat(sprintf("  Max R-hat: %.3f (%s)\n",
                   global_diagnostics$convergence_summary$max_rhat,
                   global_diagnostics$convergence_summary$worst_param))
+      cat(sprintf("  Parameters > 1.1: %d (%.1f%%)\n",
+                  global_diagnostics$convergence_summary$n_rhat_above_1.1,
+                  global_diagnostics$convergence_summary$pct_rhat_above_1.1))
+      cat(sprintf("  Mean ESS: %.0f | Min ESS: %.0f\n",
+                  global_diagnostics$convergence_summary$mean_ess,
+                  global_diagnostics$convergence_summary$min_ess))
+      cat(sprintf("  Diagnostics saved to: %s\n",
+                  global_diagnostics$log_filepath))
     }
   } else {
     gelman_diag <- try(gelman.diag(samples$samples, multivariate = FALSE), silent = TRUE)
@@ -734,47 +742,14 @@ for (gender in genders) {
 
   # ==================================================================
   # HELPER FUNCTIONS FOR NO-DATA COUNTRIES
+  # Reuse the proper hierarchical sampling from prediction_all_countries.R
+  # (uses actual within-region SDs from MCMC posteriors)
   # ==================================================================
 
-  sample_cig_params_from_prior <- function(region_num, mcmc_samples, n_samples, nAgeSpline, nCohortSpline) {
-    # Sample country intercept deviation from regional variance
-    within_sd_col <- grep("intercept_within_region_sd", colnames(mcmc_samples))
-    if (length(within_sd_col) > 0) {
-      within_sd <- mcmc_samples[, within_sd_col[1]]
-    } else {
-      within_sd <- rep(0.3, n_samples)
-    }
-    country_intercept <- rnorm(n_samples, 0, within_sd)
-
-    # Sample age splines from regional means with noise
-    age_splines <- matrix(0, n_samples, nAgeSpline)
-    for (l in 1:nAgeSpline) {
-      regional_col <- paste0("cig_age_spline_region_mean[", region_num, ", ", l, "]")
-      if (regional_col %in% colnames(mcmc_samples)) {
-        age_splines[, l] <- mcmc_samples[, regional_col] + rnorm(n_samples, 0, 0.1)
-      }
-    }
-
-    # Sample cohort splines from regional means
-    cohort_splines <- matrix(0, n_samples, nCohortSpline)
-    for (m in 1:nCohortSpline) {
-      regional_col <- paste0("cig_cohort_spline_region_mean[", region_num, ", ", m, "]")
-      if (regional_col %in% colnames(mcmc_samples)) {
-        cohort_splines[, m] <- mcmc_samples[, regional_col] + rnorm(n_samples, 0, 0.1)
-      }
-    }
-
-    list(country_intercept = country_intercept, age_splines = age_splines, cohort_splines = cohort_splines)
-  }
-
-  sample_extra_intercept_from_prior <- function(head_prefix, mcmc_samples, n_samples) {
-    within_sd_col <- grep(paste0(head_prefix, "_intercept_within_region_sd"), colnames(mcmc_samples))
-    if (length(within_sd_col) > 0) {
-      within_sd <- mcmc_samples[, within_sd_col[1]]
-    } else {
-      within_sd <- rep(0.5, n_samples)
-    }
-    rnorm(n_samples, 0, within_sd)
+  if (file.exists("R/prediction_all_countries.R")) {
+    source("R/prediction_all_countries.R")
+  } else {
+    stop("R/prediction_all_countries.R not found — required for no-data country predictions")
   }
 
   # ==================================================================

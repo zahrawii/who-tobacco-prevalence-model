@@ -2861,7 +2861,6 @@ fit_single_country_model <- function(country_code, gender, shared_data_path) {
       "residual_sd"
     ),
     thin = THINNING_INTERVAL,
-    enableWAIC = FALSE,
     enableWAIC = FALSE
   )
 
@@ -2919,8 +2918,8 @@ fit_single_country_model <- function(country_code, gender, shared_data_path) {
   }
 
   cig_samples_full      <- extract_head_samples_country("cig", combined_samples)
-  smkextra_samples_full <- extract_head_samples_country("smkextra", combined_samples, has_age_cohort = FALSE)
-  anyextra_samples_full <- extract_head_samples_country("anyextra", combined_samples, has_age_cohort = FALSE)
+  smkextra_samples_full <- extract_head_samples_country("smkextra", combined_samples)
+  anyextra_samples_full <- extract_head_samples_country("anyextra", combined_samples)
   def_code_shared_full  <- combined_samples[, "cig_def_code_shared"]
 
   n_samples <- min(1000, nrow(combined_samples))
