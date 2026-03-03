@@ -2,7 +2,7 @@
 #
 #                    WHO TOBACCO CONTROL PREVALENCE PROJECTION MODEL
 #                    07_run_country_model.R - Country-Specific Model Fitting
-#                                   VERSION 2.3.3
+#                                   VERSION 2.4.0
 #
 #   Contains: Section 11-12 from pipeline_monolith.R
 #     - Country-specific model fitting loop (all 191 countries x 2 sexes)
@@ -310,6 +310,7 @@ fit_single_country_model <- function(country_code, gender, shared_data_path) {
   # CORRECTED: Monitors - no smkextra/anyextra age-cohort
   mcmc_config <- configureMCMC(
     nimble_model,
+    useConjugacy = FALSE,
     monitors = c(
       "cig_def_code_shared",
       "cig_intercept", "cig_age_spline", "cig_age_linear_smooth_effect",

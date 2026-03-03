@@ -13,7 +13,7 @@
 #   - Population-weighted prevalence estimates with full uncertainty                   
 #                                                                                       
 #   Developed for: World Health Organization
-#   Version: 2.3.3 (NIMBLE with subprocess isolation for DLL management)
+#   Version: 2.4.0 (NIMBLE with subprocess isolation for DLL management)
 #
 #   Changes from v2.3.2:
 #   - Subprocess isolation: Each country model runs in a fresh R process
@@ -186,7 +186,7 @@ cat("
 #########################################################################
 #                                                                       
 #              WHO TOBACCO CONTROL PREVALENCE PROJECTION                 
-#                        VERSION 2.3 (NIMBLE)                            
+#                        VERSION 2.4 (NIMBLE)
 #                                                                       
 #########################################################################
 
@@ -1268,6 +1268,7 @@ for (gender in genders) {
   
   mcmc_config <- configureMCMC(
     nimble_model,
+    useConjugacy = FALSE,
     monitors = c(
       # Global parameters
       "cig_global_intercept", "cig_def_code_shared",
@@ -2850,6 +2851,7 @@ fit_single_country_model <- function(country_code, gender, shared_data_path) {
 
   mcmc_config <- configureMCMC(
     nimble_model,
+    useConjugacy = FALSE,
     monitors = c(
       "cig_def_code_shared",
       "cig_intercept", "cig_age_spline", "cig_age_linear_smooth_effect",
@@ -3945,19 +3947,31 @@ cat("  Generating Publication Figures...\n")
 #   - eFigure 3: Weighted Trend Curves (time series with uncertainty)
 # ============================================================================
 
+# ---- Publication Figures ----
 tryCatch({
-  # Source Module 12: Publication Figures (Maps, Caterpillar, Trajectories, Heatmaps)
   if (file.exists("R/12_publication_figures.R")) {
     cat("  Sourcing R/12_publication_figures.R...\n")
     source("R/12_publication_figures.R")
   } else {
     cat("  WARNING: R/12_publication_figures.R not found.\n")
   }
+}, error = function(e) {
+  cat(sprintf("  WARNING: Publication figures failed: %s\n", e$message))
+  cat("  Continuing with pipeline...\n")
+})
 
-  # Source Module 13: Strata-Level Figures (Age Curves, Trends per Country/Gender/Year)
+# ---- Strata-Level Figures ----
+tryCatch({
   if (file.exists("R/13_strata_figures.R")) {
     cat("  Sourcing R/13_strata_figures.R...\n")
     source("R/13_strata_figures.R")
+    # Explicit call — the file never auto-executes, only defines functions
+    generate_all_strata_figures(
+      clean_data = clean_data,
+      predictions = if (exists("final_ac_predictions")) final_ac_predictions else NULL,
+      trend_data = if (exists("final_weighted_results_selected")) final_weighted_results_selected else NULL,
+      country_name_mapping = if (exists("country_name_mapping")) country_name_mapping else NULL
+    )
   } else {
     cat("  WARNING: R/13_strata_figures.R not found.\n")
     cat("  Falling back to basic visualization...\n")
@@ -3995,7 +4009,7 @@ tryCatch({
     }
   }
 }, error = function(e) {
-  cat(sprintf("  WARNING: Figure generation failed: %s\n", e$message))
+  cat(sprintf("  WARNING: Strata figures failed: %s\n", e$message))
   cat("  Continuing with pipeline...\n")
 })
 

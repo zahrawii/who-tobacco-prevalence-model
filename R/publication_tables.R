@@ -116,6 +116,7 @@ extract_pct <- function(x) {
 
 #' Format count with percentage
 format_count_pct <- function(n, total) {
+  if (total == 0) return("0 (0%)")
   pct <- round(n / total * 100)
   sprintf("%d (%d%%)", n, pct)
 }
@@ -302,6 +303,9 @@ generate_table1 <- function(clean_data,
   )
 
   # STEP 8: Create GT table
+  n_men_rows <- sum(table1_final$Gender == "Men")
+  n_women_rows <- sum(table1_final$Gender == "Women")
+
   gt_table1 <- table1_final %>%
     select(-Gender) %>%
     gt(rowname_col = "Region_Name", groupname_col = NULL) %>%
@@ -311,11 +315,11 @@ generate_table1 <- function(clean_data,
     ) %>%
     tab_row_group(
       label = md("**Men**"),
-      rows = 1:7
+      rows = 1:n_men_rows
     ) %>%
     tab_row_group(
       label = md("**Women**"),
-      rows = 8:14
+      rows = (n_men_rows + 1):(n_men_rows + n_women_rows)
     ) %>%
     row_group_order(groups = c("Men", "Women")) %>%
     cols_label(
@@ -928,8 +932,10 @@ generate_table_s3 <- function(weighted_results,
     mutate(Target = Baseline * (1 - REDUCTION_TARGET))
 
   # Get 2030 prediction with CI if available
-  ci_lower_col <- if ("weighted_lower" %in% names(weighted_results)) "weighted_lower" else NULL
-  ci_upper_col <- if ("weighted_upper" %in% names(weighted_results)) "weighted_upper" else NULL
+  ci_lower_col <- if ("weighted_lower_ci" %in% names(weighted_results)) "weighted_lower_ci" else
+    if ("weighted_lower" %in% names(weighted_results)) "weighted_lower" else NULL
+  ci_upper_col <- if ("weighted_upper_ci" %in% names(weighted_results)) "weighted_upper_ci" else
+    if ("weighted_upper" %in% names(weighted_results)) "weighted_upper" else NULL
 
   pred_cols <- c(country_col, sex_col, prev_col)
   if (!is.null(ci_lower_col)) pred_cols <- c(pred_cols, ci_lower_col, ci_upper_col)
@@ -1080,11 +1086,11 @@ generate_table_s4 <- function(model_selection_results,
       Region_Name = tools::toTitleCase(region_consolidated),
       Country_Name = tools::toTitleCase(country_name),
       Gender = format_gender(!!sym(sex_col)),
-      RMSE_Global = ifelse(!is.na(RMSE_Global), sprintf("%.4f", RMSE_Global), "-"),
-      RMSE_Country = ifelse(!is.na(RMSE_Country), sprintf("%.4f", RMSE_Country), "-"),
+      RMSE_Global = ifelse(!is.na(Mean_Global_RMSE), sprintf("%.4f", Mean_Global_RMSE), "-"),
+      RMSE_Country = ifelse(!is.na(Mean_Country_RMSE), sprintf("%.4f", Mean_Country_RMSE), "-"),
       Selected_Model = ifelse(Final_Selected_Model == "Global", "Global APC", "Country APC")
     ) %>%
-    select(Region_Name, Country_Name, Gender, n_observations,
+    select(Region_Name, Country_Name, Gender, n_observations = Total_Observations,
            RMSE_Global, RMSE_Country, Selected_Model) %>%
     arrange(Region_Name, Country_Name, desc(Gender == "Men"))
 
@@ -1258,6 +1264,28 @@ if (!exists("clean_data")) {
   # Use appropriate region mapping
   if (!exists("country_region_mapping") && exists("country_region_manual")) {
     country_region_mapping <- country_region_manual
+  }
+
+  # Enrich country_region_mapping with country_name (needed by Tables S3, S4, S5)
+  if (!"country_name" %in% names(country_region_mapping)) {
+    if (exists("country_name_mapping")) {
+      country_region_mapping <- country_region_mapping %>%
+        mutate(country_name = country_name_mapping[wb_country_abv])
+      cat("  Added country_name to country_region_mapping from country_name_mapping.\n")
+    } else if ("country" %in% names(clean_data)) {
+      # Fallback: extract from clean_data
+      name_lookup <- clean_data %>%
+        distinct(wb_country_abv, country) %>%
+        { setNames(.$country, .$wb_country_abv) }
+      country_region_mapping <- country_region_mapping %>%
+        mutate(country_name = name_lookup[wb_country_abv])
+      cat("  Added country_name to country_region_mapping from clean_data.\n")
+    } else {
+      # Last resort: use ISO code as name
+      country_region_mapping <- country_region_mapping %>%
+        mutate(country_name = toupper(wb_country_abv))
+      cat("  WARNING: No country names available, using ISO codes.\n")
+    }
   }
 
   # Detect weighted results

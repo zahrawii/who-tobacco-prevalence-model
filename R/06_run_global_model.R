@@ -2,7 +2,7 @@
 #
 #                    WHO TOBACCO CONTROL PREVALENCE PROJECTION MODEL
 #                      06_run_global_model.R - Global Model Fitting
-#                                   VERSION 2.3.2
+#                                   VERSION 2.4.0
 #
 #   Contains: Sections 8-10 from pipeline_monolith.R
 #     - Global hierarchical model fitting for males/females
@@ -204,6 +204,7 @@ for (gender in genders) {
 
   mcmc_config <- configureMCMC(
     nimble_model,
+    useConjugacy = FALSE,
     monitors = c(
       "cig_global_intercept", "cig_def_code_shared",
       "smkextra_global_intercept", "anyextra_global_intercept",
