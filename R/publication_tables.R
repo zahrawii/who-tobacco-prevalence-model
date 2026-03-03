@@ -1242,6 +1242,13 @@ generate_table_s5 <- function(clean_data,
 dir.create("tables_publication", showWarnings = FALSE, recursive = TRUE)
 
 # Check for required data
+cat("  DEBUG: clean_data exists =", exists("clean_data"), "\n")
+cat("  DEBUG: country_region_mapping exists =", exists("country_region_mapping"), "\n")
+cat("  DEBUG: country_region_manual exists =", exists("country_region_manual"), "\n")
+cat("  DEBUG: final_weighted_results_selected exists =", exists("final_weighted_results_selected"), "\n")
+cat("  DEBUG: combined_apc_weighted_results exists =", exists("combined_apc_weighted_results"), "\n")
+cat("  DEBUG: country_sex_summary exists =", exists("country_sex_summary"), "\n")
+
 if (!exists("clean_data")) {
   cat("  ERROR: clean_data not found. Cannot generate tables.\n")
 } else if (!exists("country_region_mapping") && !exists("country_region_manual")) {
@@ -1281,6 +1288,7 @@ if (!exists("clean_data")) {
       )
     }, error = function(e) {
       cat("  ERROR generating Table 1:", e$message, "\n")
+      cat("  Traceback:", paste(capture.output(traceback(e)), collapse="\n"), "\n")
     })
   }
 
@@ -1294,6 +1302,7 @@ if (!exists("clean_data")) {
       )
     }, error = function(e) {
       cat("  ERROR generating Table 2:", e$message, "\n")
+      cat("  Traceback:", paste(capture.output(traceback(e)), collapse="\n"), "\n")
     })
   }
 
@@ -1307,6 +1316,7 @@ if (!exists("clean_data")) {
       )
     }, error = function(e) {
       cat("  ERROR generating Table 3:", e$message, "\n")
+      cat("  Traceback:", paste(capture.output(traceback(e)), collapse="\n"), "\n")
     })
   }
 
@@ -1320,6 +1330,7 @@ if (!exists("clean_data")) {
       )
     }, error = function(e) {
       cat("  ERROR generating Table S1:", e$message, "\n")
+      cat("  Traceback:", paste(capture.output(traceback(e)), collapse="\n"), "\n")
     })
   }
 
@@ -1333,6 +1344,7 @@ if (!exists("clean_data")) {
       )
     }, error = function(e) {
       cat("  ERROR generating Table S3:", e$message, "\n")
+      cat("  Traceback:", paste(capture.output(traceback(e)), collapse="\n"), "\n")
     })
   }
 
@@ -1346,6 +1358,7 @@ if (!exists("clean_data")) {
       )
     }, error = function(e) {
       cat("  ERROR generating Table S4:", e$message, "\n")
+      cat("  Traceback:", paste(capture.output(traceback(e)), collapse="\n"), "\n")
     })
   } else {
     cat("  Skipping Table S4: country_sex_summary not available.\n")
@@ -1360,6 +1373,7 @@ if (!exists("clean_data")) {
     )
   }, error = function(e) {
     cat("  ERROR generating Table S5:", e$message, "\n")
+    cat("  Traceback:", paste(capture.output(traceback(e)), collapse="\n"), "\n")
   })
 
   # Summary

@@ -321,8 +321,7 @@ fit_single_country_model <- function(country_code, gender, shared_data_path) {
       "residual_sd"
     ),
     thin = THINNING_INTERVAL,
-    enableWAIC = FALSE,
-    useConjugacy = FALSE
+    enableWAIC = FALSE
   )
 
   mcmc_built <- buildMCMC(mcmc_config)

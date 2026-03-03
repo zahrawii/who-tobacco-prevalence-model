@@ -115,8 +115,8 @@ nimbleOptions(buildInterfacesForCompiledNestedNimbleFunctions = FALSE)
 # Production settings for reliable convergence
 NUMBER_OF_CHAINS     <- 4
 NUMBER_OF_ADAPT      <- 1000   # Informational only - NIMBLE handles adaptation internally
-NUMBER_OF_BURN       <- 5000
-NUMBER_OF_ITERATIONS <- 10000
+NUMBER_OF_BURN       <- 10000
+NUMBER_OF_ITERATIONS <- 30000
 THINNING_INTERVAL    <- 5
 
 # Analysis parameters
@@ -744,14 +744,11 @@ regional_hierarchical_global_ac_model_nimble <- nimbleCode({
       linear_weight_var[i] * cig_age_linear_smooth_effect * age_linear_smooth[i] +
       inprod(cig_cohort_spline[Country[i], 1:nCohortSpline], 
              cohort_spline_matrix[i, 1:nCohortSpline]) +
-      inprod(cig_age_cohort_interaction[1:nAgeXCohortSplines], 
-             age_cohort_interaction_matrix[i, 1:nAgeXCohortSplines]) +
       survey_intercept[Survey[i]]
-    
+
     # ----------------------------------------------------------------
     # Head 2: Other smoked tobacco (SIMPLIFIED - weak signal)
     # Uses: country intercept + REGIONAL splines (not country splines)
-    # No age-cohort interactions (the worst convergence offenders)
     # ----------------------------------------------------------------
     mu_smkextra[i] <- smkextra_global_intercept +
       smkextra_region_intercept[Country_Region[Country[i]]] +
@@ -937,13 +934,6 @@ regional_hierarchical_global_ac_model_nimble <- nimbleCode({
     survey_intercept[s] ~ dnorm(0, sd = survey_intercept_sd)
   }
   
-  # ==================================================================
-  # AGE-COHORT INTERACTIONS (CIG ONLY - tighter prior)
-  # ==================================================================
-  
-  for (k in 1:nAgeXCohortSplines) {
-    cig_age_cohort_interaction[k] ~ dnorm(0, sd = 0.2)
-  }
 })
 
 
@@ -963,12 +953,9 @@ regional_country_specific_ac_model_nimble <- nimbleCode({
       linear_weight_var[i] * cig_age_linear_smooth_effect * age_linear_smooth[i] +
       inprod(cig_cohort_spline[1:nCohortSpline], 
              cohort_spline_matrix[i, 1:nCohortSpline]) +
-      inprod(cig_age_cohort_interaction[1:nAgeXCohortSplines], 
-             age_cohort_interaction_matrix[i, 1:nAgeXCohortSplines]) +
       survey_intercept[Survey[i]]
-    
+
     # Head 2: Other smoked (SIMPLIFIED - matches global model structure)
-    # NO age-cohort interactions (global model doesn't have them for smkextra)
     mu_smkextra[i] <- smkextra_intercept +
       0.3 * cig_def_code_shared * Def_Code_Binary[i] +
       spline_weight_var[i] * inprod(smkextra_age_spline[1:nAgeSpline], 
@@ -1026,11 +1013,6 @@ regional_country_specific_ac_model_nimble <- nimbleCode({
     cig_cohort_spline[m] ~ dnorm(cig_cohort_spline_prior_means[m], 
                                  tau = cig_cohort_spline_prior_precs[m])
   }
-  for (k in 1:nAgeXCohortSplines) {
-    cig_age_cohort_interaction[k] ~ dnorm(cig_age_cohort_prior_means[k], 
-                                          tau = cig_age_cohort_prior_precs[k])
-  }
-  
   # ---- SMKEXTRA HEAD ----
   smkextra_intercept ~ dnorm(smkextra_intercept_prior_mean, tau = smkextra_intercept_prior_prec)
   
@@ -1178,8 +1160,6 @@ for (gender in genders) {
     nSurvey = length(unique(gender_data$Num_Survey)),
     nAgeSpline = ncol(gender_data[, grep("^age_spline_", names(gender_data))]),
     nCohortSpline = ncol(gender_data[, grep("^cohort_spline_", names(gender_data))]),
-    nAgeXCohortSplines = ncol(gender_data[, grep("^age_cohort_", names(gender_data))]),
-    
     # Index vectors
     Country = as.integer(gender_data$Num_Country),
     # FIXED: Country_Region is now length nCountry, indexed by country number
@@ -1204,7 +1184,6 @@ for (gender in genders) {
     Type_Any = gender_data$Type_Any,
     age_spline_matrix = as.matrix(gender_data[, grep("^age_spline_", names(gender_data))]),
     cohort_spline_matrix = as.matrix(gender_data[, grep("^cohort_spline_", names(gender_data))]),
-    age_cohort_interaction_matrix = as.matrix(gender_data[, grep("^age_cohort_", names(gender_data))]),
     age_linear_smooth = gender_data$age_linear_smooth,
     spline_weight_var = gender_data$spline_weight_var,
     linear_weight_var = gender_data$linear_weight_var,
@@ -1307,9 +1286,6 @@ for (gender in genders) {
       # Country splines (CIG ONLY)
       "cig_age_spline", "cig_cohort_spline",
       
-      # Age-cohort interactions (CIG ONLY)
-      "cig_age_cohort_interaction",
-      
       # Linear age effects (all heads)
       "cig_age_linear_smooth_effect", "smkextra_age_linear_smooth_effect", "anyextra_age_linear_smooth_effect",
       
@@ -1319,8 +1295,7 @@ for (gender in genders) {
       "anyextra_age_spline_global_mean", "anyextra_cohort_spline_global_mean"
     ),
     thin = THINNING_INTERVAL,
-    enableWAIC = FALSE,
-    useConjugacy = FALSE  # CHANGED: Enable conjugacy for faster sampling
+    enableWAIC = FALSE
   )
   
   # ---- 8.10 Build and Compile MCMC ----
@@ -1444,12 +1419,7 @@ for (gender in genders) {
   anyextra_age_linear_smooth    <- mean(combined_samples_matrix[, "anyextra_age_linear_smooth_effect"])
   anyextra_age_linear_smooth_sd <- sd(combined_samples_matrix[, "anyextra_age_linear_smooth_effect"])
   
-  # CIG age-cohort interactions (CIG ONLY - smkextra/anyextra no longer have these)
-  cig_age_cohort_cols  <- grep("cig_age_cohort_interaction\\[", colnames(combined_samples_matrix))
-  cig_age_cohort_means <- colMeans(combined_samples_matrix[, cig_age_cohort_cols])
-  cig_age_cohort_sds   <- apply(combined_samples_matrix[, cig_age_cohort_cols], 2, sd)
-  
-  # REMOVED: smkextra_age_cohort_* and anyextra_age_cohort_* - these parameters no longer exist
+  # REMOVED: cig_age_cohort_interaction parameters (Tier 1 convergence fix)
   
   # ---- 8.14 Save Country Priors (CORRECTED v2.3.1) ----
   # 
@@ -1622,19 +1592,6 @@ for (gender in genders) {
     }
     
     # ==================================================================
-    # CIG Age-cohort interactions (global parameters, same for all countries)
-    # ==================================================================
-    cig_age_cohort_cols <- grep("^cig_age_cohort_interaction\\[", colnames(combined_samples_matrix))
-    if (length(cig_age_cohort_cols) > 0) {
-      cig_age_cohort_means <- colMeans(combined_samples_matrix[, cig_age_cohort_cols, drop = FALSE])
-      cig_age_cohort_sds   <- apply(combined_samples_matrix[, cig_age_cohort_cols, drop = FALSE], 2, sd)
-    } else {
-      n_interactions <- nimble_constants$nAgeXCohortSplines
-      cig_age_cohort_means <- rep(0, n_interactions)
-      cig_age_cohort_sds   <- rep(0.1, n_interactions)
-    }
-    
-    # ==================================================================
     # Age linear effects (global parameters)
     # ==================================================================
     cig_age_linear_mean <- mean(combined_samples_matrix[, "cig_age_linear_smooth_effect"])
@@ -1663,7 +1620,6 @@ for (gender in genders) {
     # Minimum SDs to prevent numerical issues (precision explosion)
     min_sd_intercept   <- 0.05
     min_sd_spline      <- 0.02
-    min_sd_interaction <- 0.01
     min_sd_linear      <- 0.002
     
     # CORRECTED: No smkextra/anyextra age-cohort (not in global model)
@@ -1676,7 +1632,6 @@ for (gender in genders) {
         "cig_age_linear_smooth_effect",
         paste0("cig_age_spline_", 1:length(cig_age_spline_means)),
         paste0("cig_cohort_spline_", 1:length(cig_cohort_spline_means)),
-        paste0("cig_age_cohort_interaction_", 1:length(cig_age_cohort_means)),
         # SMKEXTRA parameters (NO age-cohort)
         "smkextra_intercept", 
         "smkextra_age_linear_smooth_effect",
@@ -1696,7 +1651,6 @@ for (gender in genders) {
         cig_age_linear_mean,
         cig_age_spline_means,
         cig_cohort_spline_means,
-        cig_age_cohort_means,
         # SMKEXTRA
         smkextra_intercept_stats$mean,
         smkextra_age_linear_mean,
@@ -1716,7 +1670,6 @@ for (gender in genders) {
         pmax(cig_age_linear_sd * shrinkage, min_sd_linear),
         pmax(cig_age_spline_sds * shrinkage, min_sd_spline),
         pmax(cig_cohort_spline_sds * shrinkage, min_sd_spline),
-        pmax(cig_age_cohort_sds * shrinkage, min_sd_interaction),
         # SMKEXTRA
         pmax(smkextra_intercept_stats$sd * shrinkage, min_sd_intercept),
         pmax(smkextra_age_linear_sd * shrinkage, min_sd_linear),
@@ -1762,15 +1715,14 @@ for (gender in genders) {
   n_samples <- min(1000, nrow(combined_samples_matrix))
   sampled_indices <- sort(sample(nrow(combined_samples_matrix), n_samples))
   
-  # CIG: Full extraction (country splines + interactions + REGIONAL INTERCEPT)
+  # CIG: Full extraction (country splines + REGIONAL INTERCEPT)
   cig_samples <- list(
     global_intercept  = combined_samples_matrix[sampled_indices, "cig_global_intercept"],
     region_intercept  = combined_samples_matrix[sampled_indices, grep("^cig_region_intercept\\[", colnames(combined_samples_matrix))],
     age_linear_smooth = combined_samples_matrix[sampled_indices, "cig_age_linear_smooth_effect"],
     country_intercept = combined_samples_matrix[sampled_indices, grep("^cig_country_intercept\\[", colnames(combined_samples_matrix))],
     age_spline        = combined_samples_matrix[sampled_indices, grep("^cig_age_spline\\[", colnames(combined_samples_matrix))],
-    cohort_spline     = combined_samples_matrix[sampled_indices, grep("^cig_cohort_spline\\[", colnames(combined_samples_matrix))],
-    age_cohort        = combined_samples_matrix[sampled_indices, grep("^cig_age_cohort_interaction\\[", colnames(combined_samples_matrix))]
+    cohort_spline     = combined_samples_matrix[sampled_indices, grep("^cig_cohort_spline\\[", colnames(combined_samples_matrix))]
   )
   
   # SMKEXTRA: Simplified (country intercepts + REGIONAL splines + REGIONAL INTERCEPT)
@@ -1899,20 +1851,8 @@ for (gender in genders) {
   new_data_age_cohort$spline_weight_var   <- new_data_age_cohort$spline_weight
   new_data_age_cohort$linear_weight_var   <- new_data_age_cohort$linear_weight
   
-  new_n_interactions <- ncol(new_age_spline_basis_df) * ncol(new_cohort_spline_basis_df)
-  new_age_cohort_interaction_matrix <- matrix(0, nrow = nrow(new_data_age_cohort), ncol = new_n_interactions)
-  
-  for (i in 1:nrow(new_data_age_cohort)) {
-    age_values    <- as.numeric(new_age_spline_basis_df[i, ])
-    cohort_values <- as.numeric(new_cohort_spline_basis_df[i, ])
-    new_age_cohort_interaction_matrix[i, ] <- as.vector(outer(age_values, cohort_values))
-  }
-  
-  new_age_cohort_interaction_df <- as.data.frame(new_age_cohort_interaction_matrix)
-  colnames(new_age_cohort_interaction_df) <- paste0("age_cohort_", 1:ncol(new_age_cohort_interaction_df))
-  
   new_data_apc <- cbind(new_data_age_cohort, new_age_spline_basis_df,
-                        new_cohort_spline_basis_df, new_age_cohort_interaction_df)
+                        new_cohort_spline_basis_df)
   
   # ---- 8.16 Parallel Prediction ----
   # CORRECTED: Added regional intercept to prediction formulas
@@ -1971,8 +1911,7 @@ for (gender in genders) {
         spline_weight_value           <- current_data$spline_weight_var[j]
         linear_weight_value           <- current_data$linear_weight_var[j]
         cohort_spline_values          <- as.numeric(current_data[j, grep("^cohort_spline_", names(current_data))])
-        age_cohort_interaction_values <- as.numeric(current_data[j, grep("^age_cohort_", names(current_data))])
-        
+
         # CIG: CORRECTED - includes regional intercept
         mu_cig <- cig_samples$global_intercept +
           cig_samples$region_intercept[, paste0("cig_region_intercept[", country_region, "]")] +
@@ -1980,8 +1919,7 @@ for (gender in genders) {
           def_code_shared_samples * def_code_binary +
           spline_weight_value * as.matrix(cig_samples$age_spline[, paste0("cig_age_spline[", country, ", ", 1:length(age_spline_values), "]")]) %*% age_spline_values +
           linear_weight_value * cig_samples$age_linear_smooth * age_linear_smooth +
-          as.matrix(cig_samples$cohort_spline[, paste0("cig_cohort_spline[", country, ", ", 1:length(cohort_spline_values), "]")]) %*% cohort_spline_values +
-          as.matrix(cig_samples$age_cohort) %*% age_cohort_interaction_values
+          as.matrix(cig_samples$cohort_spline[, paste0("cig_cohort_spline[", country, ", ", 1:length(cohort_spline_values), "]")]) %*% cohort_spline_values
         
         # SMKEXTRA: CORRECTED - includes regional intercept
         mu_smkextra <- smkextra_samples$global_intercept +
@@ -2229,7 +2167,6 @@ for (gender in genders) {
           spline_weight_value <- current_data$spline_weight_var[j]
           linear_weight_value <- current_data$linear_weight_var[j]
           cohort_spline_values <- as.numeric(current_data[j, grep("^cohort_spline_", names(current_data))])
-          age_cohort_interaction_values <- as.numeric(current_data[j, grep("^age_cohort_", names(current_data))])
 
           # CIG: Use sampled country parameters from hierarchical prior
           mu_cig <- cig_samples$global_intercept +
@@ -2238,8 +2175,7 @@ for (gender in genders) {
             def_code_shared_samples * def_code_binary +
             spline_weight_value * as.matrix(cig_age_spline_sampled) %*% age_spline_values +
             linear_weight_value * cig_samples$age_linear_smooth * age_linear_smooth +
-            as.matrix(cig_cohort_spline_sampled) %*% cohort_spline_values +
-            as.matrix(cig_samples$age_cohort) %*% age_cohort_interaction_values
+            as.matrix(cig_cohort_spline_sampled) %*% cohort_spline_values
 
           # SMKEXTRA: Country intercept + regional splines
           mu_smkextra <- smkextra_samples$global_intercept +
@@ -2786,7 +2722,6 @@ fit_single_country_model <- function(country_code, gender, shared_data_path) {
 
   nAgeSpline <- ncol(country_data[, grep("^age_spline_", names(country_data))])
   nCohortSpline <- ncol(country_data[, grep("^cohort_spline_", names(country_data))])
-  nAgeXCohortSplines <- ncol(country_data[, grep("^age_cohort_", names(country_data))])
   nSurvey <- length(unique(country_data$Num_Survey))
 
   get_prior_vector <- function(prefix, n) {
@@ -2808,7 +2743,6 @@ fit_single_country_model <- function(country_code, gender, shared_data_path) {
 
   cig_age_spline_priors <- get_prior_vector("cig_age_spline_", nAgeSpline)
   cig_cohort_spline_priors <- get_prior_vector("cig_cohort_spline_", nCohortSpline)
-  cig_age_cohort_priors <- get_prior_vector("cig_age_cohort_interaction_", nAgeXCohortSplines)
   smkextra_age_spline_priors <- get_prior_vector("smkextra_age_spline_", nAgeSpline)
   smkextra_cohort_spline_priors <- get_prior_vector("smkextra_cohort_spline_", nCohortSpline)
   anyextra_age_spline_priors <- get_prior_vector("anyextra_age_spline_", nAgeSpline)
@@ -2819,7 +2753,6 @@ fit_single_country_model <- function(country_code, gender, shared_data_path) {
     nSurvey = nSurvey,
     nAgeSpline = nAgeSpline,
     nCohortSpline = nCohortSpline,
-    nAgeXCohortSplines = nAgeXCohortSplines,
     Survey = as.integer(country_data$Num_Survey),
     cig_def_code_shared_prior_mean = get_prior("cig_def_code_shared")$mean,
     cig_def_code_shared_prior_prec = sd_to_prec(get_prior("cig_def_code_shared")$sd),
@@ -2831,8 +2764,6 @@ fit_single_country_model <- function(country_code, gender, shared_data_path) {
     cig_age_spline_prior_precs = sd_to_prec(cig_age_spline_priors$sds),
     cig_cohort_spline_prior_means = cig_cohort_spline_priors$means,
     cig_cohort_spline_prior_precs = sd_to_prec(cig_cohort_spline_priors$sds),
-    cig_age_cohort_prior_means = cig_age_cohort_priors$means,
-    cig_age_cohort_prior_precs = sd_to_prec(cig_age_cohort_priors$sds),
     smkextra_intercept_prior_mean = get_prior("smkextra_intercept")$mean,
     smkextra_intercept_prior_prec = sd_to_prec(get_prior("smkextra_intercept")$sd),
     smkextra_age_linear_smooth_effect_prior_mean = get_prior("smkextra_age_linear_smooth_effect")$mean,
@@ -2859,7 +2790,6 @@ fit_single_country_model <- function(country_code, gender, shared_data_path) {
     Type_Any = country_data$Type_Any,
     age_spline_matrix = as.matrix(country_data[, grep("^age_spline_", names(country_data))]),
     cohort_spline_matrix = as.matrix(country_data[, grep("^cohort_spline_", names(country_data))]),
-    age_cohort_interaction_matrix = as.matrix(country_data[, grep("^age_cohort_", names(country_data))]),
     age_linear_smooth = country_data$age_linear_smooth,
     spline_weight_var = country_data$spline_weight_var,
     linear_weight_var = country_data$linear_weight_var,
@@ -2881,7 +2811,6 @@ fit_single_country_model <- function(country_code, gender, shared_data_path) {
       survey_intercept = rnorm(nSurvey, 0, 0.1),
       cig_age_spline = rnorm(nAgeSpline, cig_age_spline_priors$means, 0.05),
       cig_cohort_spline = rnorm(nCohortSpline, cig_cohort_spline_priors$means, 0.05),
-      cig_age_cohort_interaction = rnorm(nAgeXCohortSplines, cig_age_cohort_priors$means, 0.02),
       smkextra_age_spline = rnorm(nAgeSpline, smkextra_age_spline_priors$means, 0.05),
       smkextra_cohort_spline = rnorm(nCohortSpline, smkextra_cohort_spline_priors$means, 0.05),
       anyextra_age_spline = rnorm(nAgeSpline, anyextra_age_spline_priors$means, 0.05),
@@ -2924,7 +2853,7 @@ fit_single_country_model <- function(country_code, gender, shared_data_path) {
     monitors = c(
       "cig_def_code_shared",
       "cig_intercept", "cig_age_spline", "cig_age_linear_smooth_effect",
-      "cig_cohort_spline", "cig_age_cohort_interaction",
+      "cig_cohort_spline",
       "smkextra_intercept", "smkextra_age_spline", "smkextra_age_linear_smooth_effect",
       "smkextra_cohort_spline",
       "anyextra_intercept", "anyextra_age_spline", "anyextra_age_linear_smooth_effect",
@@ -2933,7 +2862,7 @@ fit_single_country_model <- function(country_code, gender, shared_data_path) {
     ),
     thin = THINNING_INTERVAL,
     enableWAIC = FALSE,
-    useConjugacy = FALSE
+    enableWAIC = FALSE
   )
 
   mcmc_built <- buildMCMC(mcmc_config)
@@ -2980,20 +2909,16 @@ fit_single_country_model <- function(country_code, gender, shared_data_path) {
   rm(samples)
   saveRDS(combined_samples, file = file.path(country_dir, "posterior_samples.rds"), compress = TRUE)
 
-  extract_head_samples_country <- function(prefix, combined_samples, has_age_cohort = FALSE) {
-    result <- list(
+  extract_head_samples_country <- function(prefix, combined_samples) {
+    list(
       intercept     = combined_samples[, paste0(prefix, "_intercept")],
       age_linear    = combined_samples[, paste0(prefix, "_age_linear_smooth_effect")],
       age_spline    = combined_samples[, grep(paste0("^", prefix, "_age_spline\\["), colnames(combined_samples)), drop = FALSE],
       cohort_spline = combined_samples[, grep(paste0("^", prefix, "_cohort_spline\\["), colnames(combined_samples)), drop = FALSE]
     )
-    if (has_age_cohort) {
-      result$age_cohort <- combined_samples[, grep(paste0("^", prefix, "_age_cohort_interaction\\["), colnames(combined_samples)), drop = FALSE]
-    }
-    result
   }
 
-  cig_samples_full      <- extract_head_samples_country("cig", combined_samples, has_age_cohort = TRUE)
+  cig_samples_full      <- extract_head_samples_country("cig", combined_samples)
   smkextra_samples_full <- extract_head_samples_country("smkextra", combined_samples, has_age_cohort = FALSE)
   anyextra_samples_full <- extract_head_samples_country("anyextra", combined_samples, has_age_cohort = FALSE)
   def_code_shared_full  <- combined_samples[, "cig_def_code_shared"]
@@ -3005,7 +2930,6 @@ fit_single_country_model <- function(country_code, gender, shared_data_path) {
   cig_age_spline_s   <- cig_samples_full$age_spline[sampled_indices, , drop = FALSE]
   cig_age_lin_s      <- cig_samples_full$age_linear[sampled_indices]
   cig_cohort_s       <- cig_samples_full$cohort_spline[sampled_indices, , drop = FALSE]
-  cig_ac_s           <- cig_samples_full$age_cohort[sampled_indices, , drop = FALSE]
   smk_int_s          <- smkextra_samples_full$intercept[sampled_indices]
   smk_age_spline_s   <- smkextra_samples_full$age_spline[sampled_indices, , drop = FALSE]
   smk_age_lin_s      <- smkextra_samples_full$age_linear[sampled_indices]
@@ -3034,27 +2958,14 @@ fit_single_country_model <- function(country_code, gender, shared_data_path) {
   ))
   nCohortSpline_pred <- ncol(all_cohort_spline_mat)
 
-  nA <- nAgeSpline_shared
-  nC <- nCohortSpline_pred
-  n_int <- nA * nC
-
   cohort_spline_by_year <- vector("list", n_years)
-  interaction_by_year   <- vector("list", n_years)
   names(cohort_spline_by_year) <- as.character(years_pred)
-  names(interaction_by_year)   <- as.character(years_pred)
 
   for (y_idx in 1:n_years) {
     row_start <- (y_idx - 1) * n_ages + 1
     row_end   <- y_idx * n_ages
     cohort_mat <- all_cohort_spline_mat[row_start:row_end, , drop = FALSE]
     cohort_spline_by_year[[y_idx]] <- cohort_mat
-    int_mat <- matrix(0, n_ages, n_int)
-    for (m in 1:nC) {
-      col_start <- (m - 1) * nA + 1
-      col_end   <- m * nA
-      int_mat[, col_start:col_end] <- age_spline_mat_shared * cohort_mat[, m]
-    }
-    interaction_by_year[[y_idx]] <- int_mat
   }
 
   rm(all_cohort_spline_mat, all_birth_cohorts)
@@ -3066,7 +2977,6 @@ fit_single_country_model <- function(country_code, gender, shared_data_path) {
   for (y_idx in 1:n_years) {
     current_year <- years_pred[y_idx]
     cohort_mat   <- cohort_spline_by_year[[y_idx]]
-    int_mat      <- interaction_by_year[[y_idx]]
     birth_cohorts_year <- current_year - age_midpoints_shared
 
     for (d_idx in 1:2) {
@@ -3084,8 +2994,7 @@ fit_single_country_model <- function(country_code, gender, shared_data_path) {
         def_code_binary * (ones_ages %o% def_shared_s) +
         (age_spline_mat_shared %*% t(cig_age_spline_s)) * spline_weight_shared +
         outer(linear_age_product_shared, cig_age_lin_s) +
-        cohort_mat %*% t(cig_cohort_s) +
-        int_mat %*% t(cig_ac_s)
+        cohort_mat %*% t(cig_cohort_s)
 
       mu_smkextra <- ones_ages %o% smk_int_s +
         (0.3 * def_code_binary) * (ones_ages %o% def_shared_s) +
@@ -3151,7 +3060,7 @@ fit_single_country_model <- function(country_code, gender, shared_data_path) {
     }
   }
 
-  rm(cohort_spline_by_year, interaction_by_year)
+  rm(cohort_spline_by_year)
 
   result         <- do.call(rbind, results_list)
   result$Country <- country_code
