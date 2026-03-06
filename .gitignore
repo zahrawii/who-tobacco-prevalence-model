@@ -44,3 +44,6 @@ Thumbs.db
 
 # Compiled R files (intermediate outputs)
 *.rds
+
+# Local documentation (not for repo)
+expertsdiscuss.md
