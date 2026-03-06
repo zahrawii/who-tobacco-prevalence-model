@@ -65,9 +65,9 @@ nimbleOptions(buildInterfacesForCompiledNestedNimbleFunctions = FALSE)
 
 NUMBER_OF_CHAINS     <- 4
 NUMBER_OF_ADAPT      <- 1000   # Informational only - NIMBLE handles adaptation internally
-NUMBER_OF_BURN       <- 10000
-NUMBER_OF_ITERATIONS <- 30000
-THINNING_INTERVAL    <- 5
+NUMBER_OF_BURN       <- 30000  # Increased: block samplers need more adaptation time
+NUMBER_OF_ITERATIONS <- 60000  # Increased: compensate for thinning and ensure stable ESS
+THINNING_INTERVAL    <- 10     # Increased: block samplers may have higher initial autocorrelation
 
 # ---- Analysis Parameters ----
 
@@ -93,6 +93,111 @@ MANUAL_TARGET_EVAL_YEAR   <- 2040
 # ---- Legacy Variable (used throughout code) ----
 
 target_year <- TARGET_YEAR
+
+# ---- Publication Target Years ----
+
+TARGET_YEAR_2030  <- 2030    # WHO 2030 target (used in publication tables)
+ENDGAME_YEAR      <- 2040    # Tobacco endgame year
+
+# ---- Target Thresholds (dual units for different contexts) ----
+
+REDUCTION_TARGET          <- 0.30   # 30% relative reduction (proportion form)
+# Proportion form: for data comparisons where prevalence is 0-1
+ENDGAME_THRESHOLD_PROP    <- 0.05   # <5% = endgame achieved
+NEAR_ENDGAME_PROP         <- 0.10   # 5-10% = near endgame
+VIRTUAL_ELIMINATION_PROP  <- 0.02   # <2% = virtual elimination
+ON_TRACK_MARGIN           <- 0.10   # Within 10% of target = on track
+# Percentage form: for ggplot annotations where y-axis is 0-100
+ENDGAME_THRESHOLD_PCT     <- 5
+NEAR_ENDGAME_PCT          <- 10
+
+# ---- Valid Indicators (Single Source of Truth) ----
+
+VALID_INDICATORS <- c(
+  "current_user_cigarettes",
+  "current_user_any_smoked_tobacco",
+  "current_user_any_tobacco_product",
+  "daily_user_cigarettes",
+  "daily_user_any_smoked_tobacco",
+  "daily_user_any_tobacco_product"
+)
+
+PRIMARY_INDICATOR <- "current_user_cigarettes"
+
+# ---- Indicator Display Labels & Codes ----
+
+INDICATOR_LABELS <- c(
+  "current_user_cigarettes"          = "Current Cigarettes",
+  "current_user_any_smoked_tobacco"  = "Current Smoked Tobacco",
+  "current_user_any_tobacco_product" = "Current Any Tobacco",
+  "daily_user_cigarettes"            = "Daily Cigarettes",
+  "daily_user_any_smoked_tobacco"    = "Daily Smoked Tobacco",
+  "daily_user_any_tobacco_product"   = "Daily Any Tobacco"
+)
+
+INDICATOR_CODES <- c(
+  "current_user_cigarettes"          = "CU_CIG",
+  "current_user_any_smoked_tobacco"  = "CU_AST",
+  "current_user_any_tobacco_product" = "CU_ATP",
+  "daily_user_cigarettes"            = "DU_CIG",
+  "daily_user_any_smoked_tobacco"    = "DU_AST",
+  "daily_user_any_tobacco_product"   = "DU_ATP"
+)
+
+INDICATOR_COLORS <- c(
+  "current_user_any_tobacco_product" = "#E41A1C",
+  "current_user_any_smoked_tobacco"  = "#377EB8",
+  "current_user_cigarettes"          = "#4DAF4A",
+  "daily_user_any_tobacco_product"   = "#984EA3",
+  "daily_user_any_smoked_tobacco"    = "#FF7F00",
+  "daily_user_cigarettes"            = "#A65628"
+)
+
+# ---- Sex/Gender Standardization ----
+
+VALID_SEX <- c("males", "females")
+GENDER_DISPLAY <- c(males = "Men", females = "Women")
+
+# ---- Display Helper Functions ----
+
+format_gender <- function(x) {
+  dplyr::case_when(
+    tolower(x) %in% c("males", "male") ~ "Men",
+    tolower(x) %in% c("females", "female") ~ "Women",
+    TRUE ~ as.character(x)
+  )
+}
+
+format_indicator <- function(x) {
+  ifelse(x %in% names(INDICATOR_LABELS), INDICATOR_LABELS[x],
+         gsub("_", " ", tools::toTitleCase(x)))
+}
+
+# ---- WHO Publication Theme ----
+
+who_colors <- list(
+  primary = "#2C3E50", secondary = "#3498DB", accent = "#E74C3C",
+  success = "#27AE60", warning = "#F39C12", gray = "#95A5A6"
+)
+
+theme_who <- function(base_size = 11, base_family = "sans") {
+  ggplot2::theme_minimal(base_size = base_size, base_family = base_family) %+replace%
+    ggplot2::theme(
+      plot.title    = element_text(face = "bold", size = rel(1.2), hjust = 0, margin = margin(b = 5)),
+      plot.subtitle = element_text(color = "#555555", size = rel(1.0), hjust = 0, margin = margin(b = 10)),
+      plot.caption  = element_text(color = "#777777", size = rel(0.7), hjust = 1, margin = margin(t = 10)),
+      axis.title    = element_text(face = "bold", size = rel(0.9)),
+      axis.text     = element_text(color = "#333333", size = rel(0.85)),
+      panel.grid.major = element_line(color = "#E5E5E5", linewidth = 0.2),
+      panel.grid.minor = element_blank(),
+      axis.line     = element_line(color = "#333333", linewidth = 0.3),
+      legend.position      = "top",
+      legend.justification = "left",
+      legend.title  = element_text(face = "bold", size = rel(0.8)),
+      strip.background = element_rect(fill = "#F5F5F5", color = NA),
+      strip.text    = element_text(face = "bold", size = rel(0.9), hjust = 0, margin = margin(4, 4, 4, 4))
+    )
+}
 
 # ---- Output Directory Structure ----
 

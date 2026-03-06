@@ -4,7 +4,7 @@
 #                      06_run_global_model.R - Global Model Fitting
 #                                   VERSION 2.4.0
 #
-#   Contains: Sections 8-10 from pipeline_monolith.R
+#   Contains: Global model fitting, prediction generation, weighted results
 #     - Global hierarchical model fitting for males/females
 #     - Country-specific prior extraction
 #     - Prediction generation (with all OPT optimizations)
@@ -14,7 +14,7 @@
 #   Requires: All previous modules (00-05) to be sourced
 #   Outputs: final_ac_predictions, final_weighted_results_global, gender_results
 #
-#   EXTRACTED FROM: pipeline_monolith.R v2.3.2
+#   Originally extracted from monolith, now the canonical source
 #
 #########################################################################################
 
@@ -174,7 +174,22 @@ for (gender in genders) {
       cohort_spline_between_region_precision = 4 + rnorm(1, 0, 0.3),
       survey_intercept_precision = 3 + rnorm(1, 0, 0.3),
       smkextra_intercept_within_region_precision = 4 + rnorm(1, 0, 0.3),
-      anyextra_intercept_within_region_precision = 4 + rnorm(1, 0, 0.3)
+      anyextra_intercept_within_region_precision = 4 + rnorm(1, 0, 0.3),
+      # Non-centered raw parameters: init near 0 (prior is N(0,1))
+      # Overdispersed across chains via seed_offset
+      cig_country_intercept_raw = rnorm(nimble_constants$nCountry, 0, 0.1 * (1 + seed_offset * 0.5)),
+      cig_age_spline_raw = matrix(
+        rnorm(nimble_constants$nCountry * nimble_constants$nAgeSpline, 0, 0.1 * (1 + seed_offset * 0.5)),
+        nrow = nimble_constants$nCountry, ncol = nimble_constants$nAgeSpline
+      ),
+      cig_cohort_spline_raw = matrix(
+        rnorm(nimble_constants$nCountry * nimble_constants$nCohortSpline, 0, 0.1 * (1 + seed_offset * 0.5)),
+        nrow = nimble_constants$nCountry, ncol = nimble_constants$nCohortSpline
+      ),
+      # Within-region precisions for CIG (one per region)
+      cig_intercept_within_region_precision = rep(4, nimble_constants$nRegion) + rnorm(nimble_constants$nRegion, 0, 0.3),
+      cig_age_spline_within_region_precision = rep(3, nimble_constants$nRegion) + rnorm(nimble_constants$nRegion, 0, 0.3),
+      cig_cohort_spline_within_region_precision = rep(3, nimble_constants$nRegion) + rnorm(nimble_constants$nRegion, 0, 0.3)
     )
   }
 
@@ -221,6 +236,34 @@ for (gender in genders) {
     thin = THINNING_INTERVAL,
     enableWAIC = FALSE
   )
+
+  # ---- 6.11b Configure Block Samplers for CIG Non-Centered Parameters ----
+  # Block samplers propose all spline coefficients jointly per country,
+  # respecting their posterior correlations. Much more efficient than
+  # the default scalar random walk MH for correlated spline parameters.
+
+  cat("  Configuring block samplers for CIG spline parameters...\n")
+
+  for (j in 1:nimble_constants$nCountry) {
+    # Block raw age spline coefficients per country
+    age_raw_nodes <- paste0("cig_age_spline_raw[", j, ", ",
+                            1:nimble_constants$nAgeSpline, "]")
+    mcmc_config$removeSamplers(age_raw_nodes)
+    mcmc_config$addSampler(target = age_raw_nodes,
+                           type = "RW_block",
+                           control = list(adaptInterval = 500))
+
+    # Block raw cohort spline coefficients per country
+    cohort_raw_nodes <- paste0("cig_cohort_spline_raw[", j, ", ",
+                               1:nimble_constants$nCohortSpline, "]")
+    mcmc_config$removeSamplers(cohort_raw_nodes)
+    mcmc_config$addSampler(target = cohort_raw_nodes,
+                           type = "RW_block",
+                           control = list(adaptInterval = 500))
+  }
+
+  cat(sprintf("  Added %d block samplers for CIG spline parameters.\n",
+              2 * nimble_constants$nCountry))
 
   # ---- 6.12 Build and Compile MCMC ----
 

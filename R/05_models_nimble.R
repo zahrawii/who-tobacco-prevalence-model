@@ -190,25 +190,37 @@ regional_hierarchical_global_ac_model_nimble <- nimbleCode({
 
   # ==================================================================
   # COUNTRY-LEVEL PARAMETERS
+  # NON-CENTERED PARAMETERIZATION for CIG head
+  # Breaks the funnel geometry between country params and variance
+  # components, dramatically improving MCMC mixing for spline
+  # coefficients. Raw params ~ N(0,1), actual = mean + sd * raw.
+  # See expertsdiscuss.md for full rationale (Gelman et al. panel).
   # ==================================================================
 
   for (j in 1:nCountry) {
-    # CIG: Full country-level parameters (intercept + splines)
-    # Country intercept is deviation from regional intercept
-    cig_country_intercept[j] ~ dnorm(0, sd = cig_intercept_within_region_sd[Country_Region[j]])
+    # CIG: Non-centered parameterization for better MCMC mixing
+    # Country intercept: raw ~ N(0,1), actual = sd * raw
+    cig_country_intercept_raw[j] ~ dnorm(0, 1)
+    cig_country_intercept[j] <- cig_intercept_within_region_sd[Country_Region[j]] *
+                                 cig_country_intercept_raw[j]
 
+    # Age spline: raw ~ N(0,1), actual = regional_mean + sd * raw
     for (l in 1:nAgeSpline) {
-      cig_age_spline[j, l] ~ dnorm(cig_age_spline_region_mean[Country_Region[j], l],
-                                   sd = cig_age_spline_within_region_sd[Country_Region[j]])
+      cig_age_spline_raw[j, l] ~ dnorm(0, 1)
+      cig_age_spline[j, l] <- cig_age_spline_region_mean[Country_Region[j], l] +
+                               cig_age_spline_within_region_sd[Country_Region[j]] *
+                               cig_age_spline_raw[j, l]
     }
 
+    # Cohort spline: raw ~ N(0,1), actual = regional_mean + sd * raw
     for (m in 1:nCohortSpline) {
-      cig_cohort_spline[j, m] ~ dnorm(cig_cohort_spline_region_mean[Country_Region[j], m],
-                                      sd = cig_cohort_spline_within_region_sd[Country_Region[j]])
+      cig_cohort_spline_raw[j, m] ~ dnorm(0, 1)
+      cig_cohort_spline[j, m] <- cig_cohort_spline_region_mean[Country_Region[j], m] +
+                                  cig_cohort_spline_within_region_sd[Country_Region[j]] *
+                                  cig_cohort_spline_raw[j, m]
     }
 
-    # SMKEXTRA/ANYEXTRA: Only country intercepts (splines are regional)
-    # Country intercept is deviation from regional intercept
+    # SMKEXTRA/ANYEXTRA: Keep centered (already converge well with regional splines)
     smkextra_country_intercept[j] ~ dnorm(0, sd = smkextra_intercept_within_region_sd)
     anyextra_country_intercept[j] ~ dnorm(0, sd = anyextra_intercept_within_region_sd)
   }
