@@ -1863,16 +1863,19 @@ create_figure4_heatmap <- function(predictions,
   cat(sprintf("  Creating Figure 4: Age-Cohort Heatmap (%s, %s)...\n", country_code, gender))
 
   # Filter data
+  cntry_col <- if ("Country" %in% names(predictions)) "Country" else "wb_country_abv"
+  sx_col <- if ("Sex" %in% names(predictions)) "Sex" else "sex"
+
   if (country_code == "global") {
     # Aggregate across sample countries
     sample_countries <- c("usa", "gbr", "chn", "ind", "bra", "deu")
     plot_data <- predictions %>%
-      filter(Country %in% sample_countries | wb_country_abv %in% sample_countries) %>%
-      filter(Sex == gender | sex == gender)
+      filter(!!sym(cntry_col) %in% sample_countries) %>%
+      filter(!!sym(sx_col) == gender)
   } else {
     plot_data <- predictions %>%
-      filter(Country == country_code | wb_country_abv == country_code) %>%
-      filter(Sex == gender | sex == gender)
+      filter(!!sym(cntry_col) == country_code) %>%
+      filter(!!sym(sx_col) == gender)
   }
 
   # Filter by indicator
@@ -2065,12 +2068,16 @@ create_efigure2_age_profile <- function(observed_data,
   cat(sprintf("  Creating eFigure 2: Age Profile (%s, %s, %d)...\n", country_code, gender, year))
 
   # Prepare observed data
+  obs_cc <- if ("wb_country_abv" %in% names(observed_data)) "wb_country_abv" else "Country"
+  obs_sx <- if ("sex" %in% names(observed_data)) "sex" else "Sex"
+  obs_ind <- if ("def_type_code" %in% names(observed_data)) "def_type_code" else "Def_Type_Code"
+  obs_yr <- if ("year" %in% names(observed_data)) "year" else "Year"
   obs <- observed_data %>%
     filter(
-      (wb_country_abv == country_code | Country == country_code),
-      (sex == gender | Sex == gender),
-      (def_type_code == indicator | Indicator == indicator),
-      abs(as.numeric(if("year" %in% names(.)) year else Year) - year) <= 2
+      !!sym(obs_cc) == country_code,
+      !!sym(obs_sx) == gender,
+      !!sym(obs_ind) == indicator,
+      abs(as.numeric(!!sym(obs_yr)) - year) <= 2
     ) %>%
     mutate(
       Age = if("Age_Midpoint" %in% names(.)) Age_Midpoint else age,
@@ -2080,12 +2087,16 @@ create_efigure2_age_profile <- function(observed_data,
     )
 
   # Prepare global predictions
+  gp_cc <- if ("Country" %in% names(global_predictions)) "Country" else "wb_country_abv"
+  gp_sx <- if ("Sex" %in% names(global_predictions)) "Sex" else "sex"
+  gp_ind <- if ("Def_Type_Code" %in% names(global_predictions)) "Def_Type_Code" else "def_type_code"
+  gp_yr <- if ("Year" %in% names(global_predictions)) "Year" else "year"
   glob <- global_predictions %>%
     filter(
-      (Country == country_code | wb_country_abv == country_code),
-      (Sex == gender | sex == gender),
-      (Def_Type_Code == indicator | def_type_code == indicator),
-      (Year == year | as.numeric(year) == year)
+      !!sym(gp_cc) == country_code,
+      !!sym(gp_sx) == gender,
+      !!sym(gp_ind) == indicator,
+      !!sym(gp_yr) == year
     ) %>%
     mutate(
       Age = if("Age_Midpoint" %in% names(.)) Age_Midpoint else age,
@@ -2101,12 +2112,16 @@ create_efigure2_age_profile <- function(observed_data,
 
   # Prepare country predictions if available
   if (!is.null(country_predictions) && nrow(country_predictions) > 0) {
+    cp_cc <- if ("Country" %in% names(country_predictions)) "Country" else "wb_country_abv"
+    cp_sx <- if ("Sex" %in% names(country_predictions)) "Sex" else "sex"
+    cp_ind <- if ("Def_Type_Code" %in% names(country_predictions)) "Def_Type_Code" else "def_type_code"
+    cp_yr <- if ("Year" %in% names(country_predictions)) "Year" else "year"
     cntry <- country_predictions %>%
       filter(
-        (Country == country_code | wb_country_abv == country_code),
-        (Sex == gender | sex == gender),
-        (Def_Type_Code == indicator | def_type_code == indicator),
-        (Year == year | as.numeric(year) == year)
+        !!sym(cp_cc) == country_code,
+        !!sym(cp_sx) == gender,
+        !!sym(cp_ind) == indicator,
+        !!sym(cp_yr) == year
       ) %>%
       mutate(
         Age = if("Age_Midpoint" %in% names(.)) Age_Midpoint else age,
@@ -2205,11 +2220,15 @@ create_efigure3_trends <- function(weighted_trends,
   cat(sprintf("  Creating eFigure 3: Trend Curves (%s, %s)...\n", country_code, gender))
 
   # Filter data
+  wt_cc <- if ("Country" %in% names(weighted_trends)) "Country" else
+    if ("wb_country_abv" %in% names(weighted_trends)) "wb_country_abv" else "area"
+  wt_sx <- if ("Sex" %in% names(weighted_trends)) "Sex" else "sex"
+  wt_ind <- if ("Def_Type_Code" %in% names(weighted_trends)) "Def_Type_Code" else "def_type_code"
   trend_data <- weighted_trends %>%
     filter(
-      (Country == country_code | wb_country_abv == country_code | area == country_code),
-      (Sex == gender | sex == gender),
-      (Def_Type_Code == indicator | def_type_code == indicator)
+      !!sym(wt_cc) == country_code,
+      !!sym(wt_sx) == gender,
+      !!sym(wt_ind) == indicator
     )
 
   if (nrow(trend_data) == 0) {
@@ -2368,7 +2387,7 @@ generate_all_figures <- function(clean_data,
     for (g in c("males", "females")) {
       # Get observed years for this country
       obs_years <- clean_data %>%
-        filter(wb_country_abv == cc | Country == cc) %>%
+        filter(wb_country_abv == cc) %>%
         pull(year) %>%
         unique() %>%
         as.numeric()

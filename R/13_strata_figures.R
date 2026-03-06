@@ -874,12 +874,12 @@ generate_age_curve_figures <- function(clean_data, predictions,
   error_count <- 0
 
   for (i in seq_along(countries)) {
-    country <- countries[i]
+    cc <- countries[i]
 
     for (gender in genders) {
       # Get years with observed data
       obs_years <- clean_data %>%
-        filter(wb_country_abv == country, sex == gender) %>%
+        filter(wb_country_abv == cc, sex == gender) %>%
         pull(year) %>%
         unique() %>%
         sort()
@@ -887,7 +887,7 @@ generate_age_curve_figures <- function(clean_data, predictions,
       for (year in obs_years) {
         result <- tryCatch({
           create_age_curve_plots(
-            country_code = country,
+            country_code = cc,
             gender = gender,
             year = year,
             observed_data = clean_data,
