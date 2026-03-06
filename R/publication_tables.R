@@ -116,9 +116,7 @@ extract_pct <- function(x) {
 
 #' Format count with percentage
 format_count_pct <- function(n, total) {
-  if (total == 0) return("0 (0%)")
-  pct <- round(n / total * 100)
-  sprintf("%d (%d%%)", n, pct)
+  ifelse(total == 0, "0 (0%)", sprintf("%d (%d%%)", n, round(n / total * 100)))
 }
 
 #' Format prevalence with range
@@ -184,10 +182,12 @@ generate_table1 <- function(clean_data,
     select(!!sym(country_col), !!sym(sex_col), !!sym(year_col), !!sym(prev_col)) %>%
     rename(Country = !!sym(country_col), Sex = !!sym(sex_col),
            Year = !!sym(year_col), Prevalence = !!sym(prev_col)) %>%
+    distinct() %>%
     pivot_wider(
       names_from = Year,
       values_from = Prevalence,
-      names_prefix = "prev_"
+      names_prefix = "prev_",
+      values_fn = list(Prevalence = first)
     )
 
   # Handle column names dynamically
@@ -414,6 +414,7 @@ generate_table2 <- function(weighted_results,
     filter(!!sym(indicator_col) == PRIMARY_INDICATOR,
            !!sym(year_col) == BASELINE_YEAR) %>%
     select(!!sym(country_col), !!sym(sex_col), !!sym(prev_col)) %>%
+    distinct() %>%
     rename(Country = !!sym(country_col), Sex = !!sym(sex_col),
            BaseYearPrevalence = !!sym(prev_col)) %>%
     mutate(
@@ -425,12 +426,14 @@ generate_table2 <- function(weighted_results,
     filter(!!sym(indicator_col) == PRIMARY_INDICATOR,
            !!sym(year_col) %in% c(INTERIM_YEAR, TARGET_YEAR)) %>%
     select(!!sym(country_col), !!sym(sex_col), !!sym(year_col), !!sym(prev_col)) %>%
+    distinct() %>%
     rename(Country = !!sym(country_col), Sex = !!sym(sex_col),
            Year = !!sym(year_col), Prevalence = !!sym(prev_col)) %>%
     pivot_wider(
       names_from = Year,
       values_from = Prevalence,
-      names_prefix = "pred_"
+      names_prefix = "pred_",
+      values_fn = list(Prevalence = first)
     )
 
   # Column names
@@ -622,6 +625,7 @@ generate_table3 <- function(weighted_results,
     filter(!!sym(indicator_col) == PRIMARY_INDICATOR,
            !!sym(year_col) == ENDGAME_YEAR) %>%
     select(!!sym(country_col), !!sym(sex_col), !!sym(prev_col)) %>%
+    distinct() %>%
     rename(Country = !!sym(country_col), Sex = !!sym(sex_col),
            pred_2040 = !!sym(prev_col))
 
@@ -806,6 +810,7 @@ generate_table_s1 <- function(weighted_results,
       filter(!!sym(indicator_col) == ind,
              !!sym(year_col) == BASELINE_YEAR) %>%
       select(!!sym(country_col), !!sym(sex_col), !!sym(prev_col)) %>%
+      distinct() %>%
       rename(Country = !!sym(country_col), Sex = !!sym(sex_col),
              Baseline = !!sym(prev_col)) %>%
       mutate(Target = Baseline * (1 - REDUCTION_TARGET))
@@ -815,6 +820,7 @@ generate_table_s1 <- function(weighted_results,
       filter(!!sym(indicator_col) == ind,
              !!sym(year_col) == TARGET_YEAR) %>%
       select(!!sym(country_col), !!sym(sex_col), !!sym(prev_col)) %>%
+      distinct() %>%
       rename(Country = !!sym(country_col), Sex = !!sym(sex_col),
              Predicted = !!sym(prev_col))
 
@@ -927,6 +933,7 @@ generate_table_s3 <- function(weighted_results,
     filter(!!sym(indicator_col) == PRIMARY_INDICATOR,
            !!sym(year_col) == BASELINE_YEAR) %>%
     select(!!sym(country_col), !!sym(sex_col), !!sym(prev_col)) %>%
+    distinct() %>%
     rename(Country = !!sym(country_col), Sex = !!sym(sex_col),
            Baseline = !!sym(prev_col)) %>%
     mutate(Target = Baseline * (1 - REDUCTION_TARGET))
@@ -944,6 +951,7 @@ generate_table_s3 <- function(weighted_results,
     filter(!!sym(indicator_col) == PRIMARY_INDICATOR,
            !!sym(year_col) == TARGET_YEAR) %>%
     select(all_of(pred_cols)) %>%
+    distinct() %>%
     rename(Country = !!sym(country_col), Sex = !!sym(sex_col),
            Predicted = !!sym(prev_col))
 
@@ -1112,6 +1120,7 @@ generate_table_s4 <- function(model_selection_results,
     ) %>%
     tab_spanner(
       label = md("**RMSE Performance**"),
+      id = "rmse_performance",
       columns = c(RMSE_Global, RMSE_Country)
     ) %>%
     tab_style(
@@ -1123,7 +1132,7 @@ generate_table_s4 <- function(model_selection_results,
     ) %>%
     tab_footnote(
       footnote = md("RMSE = Root Mean Square Error. Lower values indicate better fit."),
-      locations = cells_column_spanners(spanners = "RMSE Performance")
+      locations = cells_column_spanners(spanners = "rmse_performance")
     ) %>%
     tab_footnote(
       footnote = md("Country APC model selected when RMSE is lower than Global APC and sufficient data available."),
