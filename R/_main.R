@@ -3,19 +3,15 @@
 #                    WHO TOBACCO CONTROL PREVALENCE PROJECTION MODEL
 #                            _main.R - Orchestrator Script
 #
-#   This script provides two execution modes:
-#     1. MODULAR: Source individual modules for phased execution
-#     2. MONOLITH: Source the complete pipeline_monolith.R file directly
-#
-#   The modular structure allows for:
+#   Orchestrates the modular pipeline with phased execution:
 #     - Phased debugging and testing
 #     - Selective re-running of specific pipeline stages
-#     - Better code organization and documentation
+#     - Checkpoint save/restore between phases
 #
 #   Usage:
-#     source("R/_main.R")           # Interactive mode (prompts for execution mode)
-#     source("R/_main.R"); run_modular_pipeline()   # Run modular pipeline
-#     source("R/_main.R"); run_monolith()           # Run pipeline_monolith.R
+#     source("R/_main.R"); run_modular_pipeline()          # Run all phases
+#     source("R/_main.R"); run_modular_pipeline("viz")     # Run only visualization
+#     source("R/_main.R"); run_modular_pipeline("global")  # Run only global model
 #
 #########################################################################################
 
@@ -35,17 +31,7 @@ if (!file.exists("data")) {
 }
 
 # ============================================================================
-# OPTION 1: Run the original monolith file directly
-# ============================================================================
-
-run_monolith <- function() {
-  cat("\n======= RUNNING PIPELINE MONOLITH =======\n")
-  cat("This will execute the complete pipeline from R/pipeline_monolith.R.\n\n")
-  source("R/pipeline_monolith.R")
-}
-
-# ============================================================================
-# OPTION 2: Run modular pipeline (phases can be run independently)
+# Run modular pipeline (phases can be run independently)
 # ============================================================================
 
 run_modular_pipeline <- function(phases = c("prep", "global", "country", "eval", "agg", "viz")) {
@@ -172,13 +158,7 @@ run_modular_pipeline <- function(phases = c("prep", "global", "country", "eval",
     # ---- Publication Tables ----
     cat("\n  Generating publication tables...\n")
     tryCatch({
-      if (file.exists("R/publication_tables.R")) {
-        source("R/publication_tables.R")
-      } else if (file.exists("R/11_publication_tables.R")) {
-        source("R/11_publication_tables.R")
-      } else {
-        cat("  WARNING: publication_tables.R not found. Skipping.\n")
-      }
+      source("R/11_publication_tables.R")
     }, error = function(e) {
       cat(sprintf("  WARNING: Publication tables failed: %s\n", e$message))
       cat("  Continuing with pipeline...\n")
@@ -267,7 +247,6 @@ dir.create("checkpoints", showWarnings = FALSE)
 cat("
 Pipeline loaded. Available commands:
 
-  run_monolith()                    - Run R/pipeline_monolith.R directly
   run_modular_pipeline()            - Run all phases
   run_modular_pipeline('prep')      - Run only Phase 1 (data preparation)
   run_modular_pipeline('global')    - Run only Phase 2 (global model)

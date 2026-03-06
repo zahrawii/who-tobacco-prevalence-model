@@ -67,68 +67,12 @@ for (d in output_dirs) {
 }
 
 # ============================================================================
-# CONFIGURATION
+# All constants (BASE_YEAR, TARGET_YEAR, INDICATOR_LABELS, INDICATOR_CODES,
+# VALID_INDICATORS, VALID_SEX, GENDER_DISPLAY, format_gender(),
+# format_indicator(), theme_who(), who_colors, INDICATOR_COLORS,
+# ENDGAME_THRESHOLD_PCT, NEAR_ENDGAME_PCT, TRANSITION_START, etc.)
+# are defined in 00_config.R — sourced before this module.
 # ============================================================================
-
-# Year parameters
-BASE_YEAR <- 2010
-TARGET_YEAR <- 2025
-TARGET_YEAR_2030 <- 2030
-ENDGAME_YEAR <- 2040
-
-# Target thresholds
-REDUCTION_TARGET <- 0.30
-ENDGAME_THRESHOLD <- 5  # 5%
-NEAR_ENDGAME_THRESHOLD <- 10  # 10%
-
-# Spline transition
-TRANSITION_START <- 65
-
-# Primary indicator
-PRIMARY_INDICATOR <- "current_user_cigarettes"
-
-# ============================================================================
-# VALID INDICATORS (Single Source of Truth)
-# ============================================================================
-
-VALID_INDICATORS <- c(
-  "current_user_cigarettes",
-  "current_user_any_smoked_tobacco",
-  "current_user_any_tobacco_product",
-  "daily_user_cigarettes",
-  "daily_user_any_smoked_tobacco",
-  "daily_user_any_tobacco_product"
-)
-
-# Indicator display labels
-INDICATOR_LABELS <- c(
-  "current_user_cigarettes"           = "Current Cigarettes",
-  "current_user_any_smoked_tobacco"   = "Current Any Smoked Tobacco",
-  "current_user_any_tobacco_product"  = "Current Any Tobacco Product",
-  "daily_user_cigarettes"             = "Daily Cigarettes",
-  "daily_user_any_smoked_tobacco"     = "Daily Any Smoked Tobacco",
-  "daily_user_any_tobacco_product"    = "Daily Any Tobacco Product"
-)
-
-# Indicator short codes for file names
-INDICATOR_CODES <- c(
-  "current_user_cigarettes"           = "CU_CIG",
-  "current_user_any_smoked_tobacco"   = "CU_SMK",
-  "current_user_any_tobacco_product"  = "CU_TOB",
-  "daily_user_cigarettes"             = "DU_CIG",
-  "daily_user_any_smoked_tobacco"     = "DU_SMK",
-  "daily_user_any_tobacco_product"    = "DU_TOB"
-)
-
-# ============================================================================
-# SEX/GENDER STANDARDIZATION (Critical for Data Consistency)
-# ============================================================================
-
-# Valid internal sex values (always lowercase, plural)
-VALID_SEX <- c("males", "females")
-
-# Display labels for gender (Men/Women for human subjects)
-GENDER_DISPLAY <- c(males = "Men", females = "Women")
 
 #' Standardize sex value to internal format
 #' Converts any variant to lowercase plural form
@@ -150,19 +94,7 @@ standardize_sex_value <- function(x) {
   return(result)
 }
 
-#' Get display label for sex
-#' @param x Internal sex value ("males" or "females")
-#' @return Display label ("Men" or "Women")
-format_gender <- function(x) {
-  result <- case_when(
-    x == "males" ~ "Men",
-    x == "females" ~ "Women",
-    x == "male" ~ "Men",
-    x == "female" ~ "Women",
-    TRUE ~ as.character(x)
-  )
-  return(result)
-}
+# format_gender() is defined in 00_config.R (case-insensitive, handles all variants)
 
 # ============================================================================
 # ASSERTION FUNCTIONS (Fail Fast on Bad Data)
@@ -375,15 +307,7 @@ region_colors <- c(
   "Other" = "#A6D854"
 )
 
-# WHO style colors
-who_colors <- list(
-  primary   = "#2C3E50",
-  secondary = "#3498DB",
-  accent    = "#E74C3C",
-  success   = "#27AE60",
-  warning   = "#F39C12",
-  gray      = "#95A5A6"
-)
+# who_colors defined in 00_config.R
 
 # ============================================================================
 # COUNTRY CODE HARMONIZATION (CRITICAL FOR MAPS)
@@ -522,31 +446,8 @@ check_unmappable_codes <- function(who_codes) {
 
 # ============================================================================
 # HELPER FUNCTIONS
+# format_gender() and format_indicator() defined in 00_config.R
 # ============================================================================
-
-#' Format gender labels
-format_gender <- function(sex) {
-  case_when(
-    tolower(sex) == "males" ~ "Men",
-    tolower(sex) == "females" ~ "Women",
-    tolower(sex) == "male" ~ "Men",
-    tolower(sex) == "female" ~ "Women",
-    TRUE ~ as.character(sex)
-  )
-}
-
-#' Format indicator labels
-format_indicator <- function(x) {
-  labels <- c(
-    "daily_user_cigarettes" = "Daily Cigarettes",
-    "current_user_cigarettes" = "Current Cigarettes",
-    "daily_user_any_smoked_tobacco" = "Daily Smoked Tobacco",
-    "current_user_any_smoked_tobacco" = "Current Smoked Tobacco",
-    "daily_user_any_tobacco_product" = "Daily Any Tobacco",
-    "current_user_any_tobacco_product" = "Current Any Tobacco"
-  )
-  ifelse(x %in% names(labels), labels[x], gsub("_", " ", tools::toTitleCase(x)))
-}
 
 #' Categorize probability into traffic-light bins (Lancet labels)
 categorize_probability <- function(prob) {
@@ -557,28 +458,7 @@ categorize_probability <- function(prob) {
       include.lowest = TRUE)
 }
 
-# ============================================================================
-# WHO MASTER THEME
-# ============================================================================
-
-theme_who <- function(base_size = 11, base_family = "sans") {
-  theme_minimal(base_size = base_size, base_family = base_family) %+replace%
-    theme(
-      plot.title = element_text(face = "bold", size = rel(1.2), hjust = 0, margin = margin(b = 5)),
-      plot.subtitle = element_text(color = "#555555", size = rel(1.0), hjust = 0, margin = margin(b = 10)),
-      plot.caption = element_text(color = "#777777", size = rel(0.7), hjust = 1, margin = margin(t = 10)),
-      axis.title = element_text(face = "bold", size = rel(0.9)),
-      axis.text = element_text(color = "#333333", size = rel(0.85)),
-      panel.grid.major = element_line(color = "#E5E5E5", linewidth = 0.2),
-      panel.grid.minor = element_blank(),
-      axis.line = element_line(color = "#333333", linewidth = 0.3),
-      legend.position = "top",
-      legend.justification = "left",
-      legend.title = element_text(face = "bold", size = rel(0.8)),
-      strip.background = element_rect(fill = "#F5F5F5", color = NA),
-      strip.text = element_text(face = "bold", size = rel(0.9), hjust = 0, margin = margin(4,4,4,4))
-    )
-}
+# theme_who() defined in 00_config.R
 
 # ============================================================================
 # LANCET MAP THEME (Publication Quality)
@@ -788,8 +668,8 @@ create_figure1_map <- function(weighted_results,
     mutate(
       prob_category = ifelse(is.na(prob_category), "No Data", as.character(prob_category)),
       prob_category = factor(prob_category,
-                             levels = c("High (>90%)", "Moderate (60-90%)", "Uncertain (40-60%)",
-                                        "Low (10-40%)", "Extremely Low (<10%)", "No Data"))
+                             levels = c("Very High (>90%)", "High (60-90%)", "Moderate (40-60%)",
+                                        "Low (10-40%)", "Very Low (<10%)", "No Data"))
     )
 
   # Create main map
@@ -849,27 +729,7 @@ create_figure1_map <- function(weighted_results,
 # EXPANDED MAP SYSTEM: ALL INDICATORS & BOTH TARGETS
 # ============================================================================
 
-# Indicator labels for display
-INDICATOR_LABELS <- c(
-  "current_user_any_tobacco_product" = "Current Any Tobacco",
-  "current_user_any_smoked_tobacco" = "Current Smoked Tobacco",
-  "current_user_cigarettes" = "Current Cigarettes",
-  "daily_user_any_tobacco_product" = "Daily Any Tobacco",
-  "daily_user_any_smoked_tobacco" = "Daily Smoked Tobacco",
-  "daily_user_cigarettes" = "Daily Cigarettes"
-)
-
-# Short indicator codes for filenames
-INDICATOR_CODES <- c(
-  "current_user_any_tobacco_product" = "CU_ATP",
-  "current_user_any_smoked_tobacco" = "CU_AST",
-  "current_user_cigarettes" = "CU_CIG",
-  "daily_user_any_tobacco_product" = "DU_ATP",
-  "daily_user_any_smoked_tobacco" = "DU_AST",
-  "daily_user_cigarettes" = "DU_CIG"
-)
-
-# All 6 indicators
+# INDICATOR_LABELS and INDICATOR_CODES defined in 00_config.R
 ALL_INDICATORS <- names(INDICATOR_LABELS)
 
 #' Calculate target probabilities from MCMC samples
@@ -989,8 +849,8 @@ create_probability_map <- function(prob_data,
     mutate(
       prob_category = ifelse(is.na(prob_category), "No Data", as.character(prob_category)),
       prob_category = factor(prob_category,
-                             levels = c("High (>90%)", "Moderate (60-90%)", "Uncertain (40-60%)",
-                                        "Low (10-40%)", "Extremely Low (<10%)", "No Data"))
+                             levels = c("Very High (>90%)", "High (60-90%)", "Moderate (40-60%)",
+                                        "Low (10-40%)", "Very Low (<10%)", "No Data"))
     )
 
   # Create title based on target type
@@ -1318,8 +1178,8 @@ create_faceted_indicator_map <- function(prob_data,
     mutate(
       prob_category = ifelse(is.na(prob_category), "No Data", as.character(prob_category)),
       prob_category = factor(prob_category,
-                             levels = c("High (>90%)", "Moderate (60-90%)", "Uncertain (40-60%)",
-                                        "Low (10-40%)", "Extremely Low (<10%)", "No Data"))
+                             levels = c("Very High (>90%)", "High (60-90%)", "Moderate (40-60%)",
+                                        "Low (10-40%)", "Very Low (<10%)", "No Data"))
     )
 
   # Title
@@ -1400,8 +1260,8 @@ create_main_cigarettes_map <- function(prob_data, output_dir = "outputs/figures/
     mutate(
       prob_category = ifelse(is.na(prob_category), "No Data", as.character(prob_category)),
       prob_category = factor(prob_category,
-                             levels = c("High (>90%)", "Moderate (60-90%)", "Uncertain (40-60%)",
-                                        "Low (10-40%)", "Extremely Low (<10%)", "No Data"))
+                             levels = c("Very High (>90%)", "High (60-90%)", "Moderate (40-60%)",
+                                        "Low (10-40%)", "Very Low (<10%)", "No Data"))
     )
 
   # Create 2x2 faceted map
@@ -1790,14 +1650,14 @@ create_figure3_trajectories <- function(trend_data,
 
   fig3 <- ggplot() +
     # Endgame zone (green rectangle)
-    annotate("rect", xmin = -Inf, xmax = Inf, ymin = 0, ymax = ENDGAME_THRESHOLD,
+    annotate("rect", xmin = -Inf, xmax = Inf, ymin = 0, ymax = ENDGAME_THRESHOLD_PCT,
              fill = "#E8F5E9", alpha = 0.8) +
-    annotate("text", x = min(plot_data$Year), y = ENDGAME_THRESHOLD / 2,
-             label = paste0("Endgame Zone (<", ENDGAME_THRESHOLD, "%)"),
+    annotate("text", x = min(plot_data$Year), y = ENDGAME_THRESHOLD_PCT / 2,
+             label = paste0("Endgame Zone (<", ENDGAME_THRESHOLD_PCT, "%)"),
              hjust = 0, vjust = 0.5, size = 3, fontface = "italic", color = "#1B5E20") +
 
     # Near-endgame zone
-    annotate("rect", xmin = -Inf, xmax = Inf, ymin = ENDGAME_THRESHOLD, ymax = NEAR_ENDGAME_THRESHOLD,
+    annotate("rect", xmin = -Inf, xmax = Inf, ymin = ENDGAME_THRESHOLD_PCT, ymax = NEAR_ENDGAME_PCT,
              fill = "#FFF9C4", alpha = 0.5) +
 
     # Country lines (background, grey)
@@ -1829,7 +1689,7 @@ create_figure3_trajectories <- function(trend_data,
     theme_who() +
     labs(
       title = paste0("Tobacco Prevalence Trajectories to ", ENDGAME_YEAR, " (", gender_filter, ")"),
-      subtitle = paste0("Regional trends with endgame zone (<", ENDGAME_THRESHOLD, "%) highlighted"),
+      subtitle = paste0("Regional trends with endgame zone (<", ENDGAME_THRESHOLD_PCT, "%) highlighted"),
       x = "Year",
       y = "Age-Standardized Prevalence (%)",
       caption = "Dashed green lines: countries near endgame (NZ, Sweden, etc.)"
@@ -2243,8 +2103,10 @@ create_efigure3_trends <- function(weighted_trends,
 
   # Check for CI columns
   lower_col <- if("Prevalence_Lower" %in% names(trend_data)) "Prevalence_Lower" else
+    if("weighted_lower_ci" %in% names(trend_data)) "weighted_lower_ci" else
     if("lower_ci" %in% names(trend_data)) "lower_ci" else NULL
   upper_col <- if("Prevalence_Upper" %in% names(trend_data)) "Prevalence_Upper" else
+    if("weighted_upper_ci" %in% names(trend_data)) "weighted_upper_ci" else
     if("upper_ci" %in% names(trend_data)) "upper_ci" else NULL
 
   trend_data <- trend_data %>%
@@ -2282,9 +2144,9 @@ create_efigure3_trends <- function(weighted_trends,
     geom_line(aes(y = Mean_Pct), color = "#2166AC", linewidth = 0.8) +
 
     # Endgame target
-    geom_hline(yintercept = ENDGAME_THRESHOLD, linetype = "dashed", color = "#1B5E20", linewidth = 0.6) +
-    annotate("text", x = min(trend_data$Year_Num), y = ENDGAME_THRESHOLD + 1,
-             label = paste0(ENDGAME_THRESHOLD, "% Endgame"), hjust = 0, size = 3, color = "#1B5E20") +
+    geom_hline(yintercept = ENDGAME_THRESHOLD_PCT, linetype = "dashed", color = "#1B5E20", linewidth = 0.6) +
+    annotate("text", x = min(trend_data$Year_Num), y = ENDGAME_THRESHOLD_PCT + 1,
+             label = paste0(ENDGAME_THRESHOLD_PCT, "% Endgame"), hjust = 0, size = 3, color = "#1B5E20") +
 
     # Key year markers
     geom_vline(xintercept = BASE_YEAR, linetype = "dotted", color = "grey50", linewidth = 0.5) +

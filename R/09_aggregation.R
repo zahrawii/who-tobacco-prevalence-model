@@ -3,7 +3,7 @@
 #                    WHO TOBACCO CONTROL PREVALENCE PROJECTION MODEL
 #                       09_aggregation.R - Regional Aggregation
 #
-#   Contains: Section 15 from pipeline_monolith.R
+#   Contains: Regional sample-based aggregation and metrics
 #     - Regional population weight preparation
 #     - Sample-based regional aggregation
 #     - Regional metrics and achievement calculation
@@ -20,12 +20,12 @@ cat("================================================================\n")
 cat("  STARTING POST-PROCESSING & REGIONAL AGGREGATION PIPELINE\n")
 cat("================================================================\n")
 
-# ---- 15.1 Load Model Selection Data ----
+# ---- 9.1 Load Model Selection Data ----
 if (!exists("country_sex_summary")) {
   country_sex_summary <- read.csv("evaluation/model_evaluation_by_country_sex.csv")
 }
 
-# ---- 15.2 Prepare Regional Population Weights ----
+# ---- 9.2 Prepare Regional Population Weights ----
 cat("  Preparing regional population weights...\n")
 
 regional_population_weights <- weights_cleaned %>%
@@ -56,7 +56,7 @@ country_regional_weights <- weights_cleaned %>%
 #                          REGIONAL AGGREGATION (SAMPLE-BASED)                          #
 #########################################################################################
 
-# ---- 15.3 Define Aggregation Function ----
+# ---- 9.3 Define Aggregation Function ----
 aggregate_selected_country_samples_to_region <- function(region_name, gender, year_range) {
 
   # 1. Identify countries in region
@@ -157,7 +157,7 @@ aggregate_selected_country_samples_to_region <- function(region_name, gender, ye
   return(TRUE)
 }
 
-# ---- 15.4 Run Aggregation (Parallel) ----
+# ---- 9.4 Run Aggregation (Parallel) ----
 cat("  Running regional aggregation (Parallel)...\n")
 
 cl <- makeCluster(detectCores() - 1)
@@ -245,7 +245,7 @@ calc_regional_metrics <- function() {
 
 regional_results_df <- calc_regional_metrics()
 
-# ---- 15.5 Calculate High-Certainty Country Percentages ----
+# ---- 9.5 Calculate High-Certainty Country Percentages ----
 
 country_achievement_summary <- final_weighted_results_selected %>%
   filter(Year == TARGET_YEAR) %>%

@@ -45,41 +45,15 @@ suppressPackageStartupMessages({
 
 # ============================================================================
 # CONFIGURATION
+# All shared constants (BASE_YEAR, TARGET_YEAR, ENDGAME_YEAR,
+# ENDGAME_THRESHOLD_PCT, TRANSITION_START, INDICATOR_COLORS, INDICATOR_LABELS,
+# format_gender(), format_indicator(), theme_who()) from 00_config.R
 # ============================================================================
 
 # Base output directory
 FIG_BASE_DIR <- "outputs/figures"
 
-# Year parameters
-BASE_YEAR <- 2010
-TARGET_YEAR <- 2025
-ENDGAME_YEAR <- 2040
-ENDGAME_THRESHOLD <- 5  # 5%
-
-# Spline transition
-TRANSITION_AGE <- 65
-
-# Indicator colors (colorblind-friendly)
-INDICATOR_COLORS <- c(
-  "current_user_any_tobacco_product" = "#E41A1C",
-  "current_user_any_smoked_tobacco" = "#377EB8",
-  "current_user_cigarettes" = "#4DAF4A",
-  "daily_user_any_tobacco_product" = "#984EA3",
-  "daily_user_any_smoked_tobacco" = "#FF7F00",
-  "daily_user_cigarettes" = "#A65628"
-)
-
-# Indicator labels
-INDICATOR_LABELS <- c(
-  "current_user_any_tobacco_product" = "Current Any Tobacco",
-  "current_user_any_smoked_tobacco" = "Current Smoked Tobacco",
-  "current_user_cigarettes" = "Current Cigarettes",
-  "daily_user_any_tobacco_product" = "Daily Any Tobacco",
-  "daily_user_any_smoked_tobacco" = "Daily Smoked Tobacco",
-  "daily_user_cigarettes" = "Daily Cigarettes"
-)
-
-# Model colors
+# Model colors (Module 13 specific)
 MODEL_COLORS <- c(
   "Global" = "#2166AC",
   "Country" = "#D55E00",
@@ -88,24 +62,8 @@ MODEL_COLORS <- c(
 
 # ============================================================================
 # HELPER FUNCTIONS
+# format_gender() and format_indicator() defined in 00_config.R
 # ============================================================================
-
-#' Format gender for display
-format_gender_label <- function(sex) {
-  case_when(
-    tolower(sex) %in% c("males", "male") ~ "Men",
-    tolower(sex) %in% c("females", "female") ~ "Women",
-    TRUE ~ as.character(sex)
-  )
-}
-
-#' Format indicator for display
-format_indicator_label <- function(indicator) {
-  if (indicator %in% names(INDICATOR_LABELS)) {
-    return(INDICATOR_LABELS[indicator])
-  }
-  return(gsub("_", " ", tools::toTitleCase(indicator)))
-}
 
 #' Create age group bins
 create_age_groups <- function(ages, breaks = c(15, 25, 35, 45, 55, 65, 75, 85, 100)) {
@@ -161,16 +119,16 @@ create_figure_dirs <- function(base_dir = FIG_BASE_DIR) {
 plot_age_curve_faceted <- function(obs_data, pred_data, country_name, gender, year) {
 
   # Get gender label
-  gender_label <- format_gender_label(gender)
+  gender_label <- format_gender(gender)
 
   # Create indicator labels for faceting
   if (nrow(pred_data) > 0) {
     pred_data <- pred_data %>%
-      mutate(Indicator_Label = format_indicator_label(Def_Type_Code))
+      mutate(Indicator_Label = format_indicator(Def_Type_Code))
   }
   if (nrow(obs_data) > 0) {
     obs_data <- obs_data %>%
-      mutate(Indicator_Label = format_indicator_label(def_type_code))
+      mutate(Indicator_Label = format_indicator(def_type_code))
   }
 
   p <- ggplot()
@@ -217,7 +175,7 @@ plot_age_curve_faceted <- function(obs_data, pred_data, country_name, gender, ye
 
   # Transition marker
   p <- p +
-    geom_vline(xintercept = TRANSITION_AGE, linetype = "dashed",
+    geom_vline(xintercept = TRANSITION_START, linetype = "dashed",
                color = "orange", alpha = 0.6, linewidth = 0.5)
 
   # Facet and styling
@@ -242,16 +200,16 @@ plot_age_curve_faceted <- function(obs_data, pred_data, country_name, gender, ye
 #' Create age curve plot - Overlay All Indicators
 plot_age_curve_overlay <- function(obs_data, pred_data, country_name, gender, year) {
 
-  gender_label <- format_gender_label(gender)
+  gender_label <- format_gender(gender)
 
   # Add indicator labels
   if (nrow(pred_data) > 0) {
     pred_data <- pred_data %>%
-      mutate(Indicator_Label = format_indicator_label(Def_Type_Code))
+      mutate(Indicator_Label = format_indicator(Def_Type_Code))
   }
   if (nrow(obs_data) > 0) {
     obs_data <- obs_data %>%
-      mutate(Indicator_Label = format_indicator_label(def_type_code))
+      mutate(Indicator_Label = format_indicator(def_type_code))
   }
 
   p <- ggplot()
@@ -276,7 +234,7 @@ plot_age_curve_overlay <- function(obs_data, pred_data, country_name, gender, ye
 
   # Transition marker
   p <- p +
-    geom_vline(xintercept = TRANSITION_AGE, linetype = "dashed",
+    geom_vline(xintercept = TRANSITION_START, linetype = "dashed",
                color = "grey50", alpha = 0.5)
 
   # Styling
@@ -368,22 +326,26 @@ create_age_curve_plots <- function(country_code, gender, year,
 #' Create trend plot - Faceted by Indicator
 plot_trend_faceted <- function(trend_data, country_name, gender) {
 
-  gender_label <- format_gender_label(gender)
+  gender_label <- format_gender(gender)
 
   trend_data <- trend_data %>%
-    mutate(Indicator_Label = format_indicator_label(Def_Type_Code))
+    mutate(Indicator_Label = format_indicator(Def_Type_Code))
 
   p <- ggplot(trend_data, aes(x = Year))
 
   # Endgame zone
   p <- p +
-    annotate("rect", xmin = -Inf, xmax = Inf, ymin = 0, ymax = ENDGAME_THRESHOLD,
+    annotate("rect", xmin = -Inf, xmax = Inf, ymin = 0, ymax = ENDGAME_THRESHOLD_PCT,
              fill = "#E8F5E9", alpha = 0.6)
 
   # Confidence ribbon if available
-  if ("lower_ci" %in% names(trend_data) && "upper_ci" %in% names(trend_data)) {
+  lower_col <- if ("weighted_lower_ci" %in% names(trend_data)) "weighted_lower_ci" else
+    if ("lower_ci" %in% names(trend_data)) "lower_ci" else NULL
+  upper_col <- if ("weighted_upper_ci" %in% names(trend_data)) "weighted_upper_ci" else
+    if ("upper_ci" %in% names(trend_data)) "upper_ci" else NULL
+  if (!is.null(lower_col) && !is.null(upper_col)) {
     p <- p + geom_ribbon(
-      aes(ymin = lower_ci * 100, ymax = upper_ci * 100),
+      aes(ymin = !!sym(lower_col) * 100, ymax = !!sym(upper_col) * 100),
       fill = "#2166AC", alpha = 0.2
     )
   }
@@ -399,7 +361,7 @@ plot_trend_faceted <- function(trend_data, country_name, gender) {
   p <- p +
     geom_vline(xintercept = BASE_YEAR, linetype = "dotted", color = "grey50") +
     geom_vline(xintercept = TARGET_YEAR, linetype = "dotted", color = "grey50") +
-    geom_hline(yintercept = ENDGAME_THRESHOLD, linetype = "dashed",
+    geom_hline(yintercept = ENDGAME_THRESHOLD_PCT, linetype = "dashed",
                color = "#1B5E20", linewidth = 0.5)
 
   # Facet and styling
@@ -412,7 +374,7 @@ plot_trend_faceted <- function(trend_data, country_name, gender) {
       subtitle = paste0(gender_label, " | All Indicators"),
       x = "Year",
       y = "Age-Standardized Prevalence (%)",
-      caption = paste0("Green zone: <", ENDGAME_THRESHOLD, "% endgame. ",
+      caption = paste0("Green zone: <", ENDGAME_THRESHOLD_PCT, "% endgame. ",
                        "Dotted lines: 2010 baseline, 2025 target.")
     )
 
@@ -422,10 +384,10 @@ plot_trend_faceted <- function(trend_data, country_name, gender) {
 #' Create trend plot - Overlay All Indicators
 plot_trend_overlay <- function(trend_data, country_name, gender) {
 
-  gender_label <- format_gender_label(gender)
+  gender_label <- format_gender(gender)
 
   trend_data <- trend_data %>%
-    mutate(Indicator_Label = format_indicator_label(Def_Type_Code))
+    mutate(Indicator_Label = format_indicator(Def_Type_Code))
 
   mean_col <- if ("weighted_mean" %in% names(trend_data)) "weighted_mean" else "Prevalence"
 
@@ -433,13 +395,17 @@ plot_trend_overlay <- function(trend_data, country_name, gender) {
 
   # Endgame zone
   p <- p +
-    annotate("rect", xmin = -Inf, xmax = Inf, ymin = 0, ymax = ENDGAME_THRESHOLD,
+    annotate("rect", xmin = -Inf, xmax = Inf, ymin = 0, ymax = ENDGAME_THRESHOLD_PCT,
              fill = "#E8F5E9", alpha = 0.6)
 
   # Light ribbons if available
-  if ("lower_ci" %in% names(trend_data) && "upper_ci" %in% names(trend_data)) {
+  lower_col <- if ("weighted_lower_ci" %in% names(trend_data)) "weighted_lower_ci" else
+    if ("lower_ci" %in% names(trend_data)) "lower_ci" else NULL
+  upper_col <- if ("weighted_upper_ci" %in% names(trend_data)) "weighted_upper_ci" else
+    if ("upper_ci" %in% names(trend_data)) "upper_ci" else NULL
+  if (!is.null(lower_col) && !is.null(upper_col)) {
     p <- p + geom_ribbon(
-      aes(ymin = lower_ci * 100, ymax = upper_ci * 100),
+      aes(ymin = !!sym(lower_col) * 100, ymax = !!sym(upper_col) * 100),
       alpha = 0.1, color = NA
     )
   }
@@ -451,7 +417,7 @@ plot_trend_overlay <- function(trend_data, country_name, gender) {
   p <- p +
     geom_vline(xintercept = BASE_YEAR, linetype = "dotted", color = "grey50") +
     geom_vline(xintercept = TARGET_YEAR, linetype = "dotted", color = "grey50") +
-    geom_hline(yintercept = ENDGAME_THRESHOLD, linetype = "dashed",
+    geom_hline(yintercept = ENDGAME_THRESHOLD_PCT, linetype = "dashed",
                color = "#1B5E20", linewidth = 0.5)
 
   # Styling
@@ -474,8 +440,8 @@ plot_trend_overlay <- function(trend_data, country_name, gender) {
 #' Create single indicator trend plot
 plot_trend_single <- function(trend_data, indicator, country_name, gender) {
 
-  gender_label <- format_gender_label(gender)
-  indicator_label <- format_indicator_label(indicator)
+  gender_label <- format_gender(gender)
+  indicator_label <- format_indicator(indicator)
 
   data <- trend_data %>% filter(Def_Type_Code == indicator)
 
@@ -487,15 +453,19 @@ plot_trend_single <- function(trend_data, indicator, country_name, gender) {
 
   # Endgame zone
   p <- p +
-    annotate("rect", xmin = -Inf, xmax = Inf, ymin = 0, ymax = ENDGAME_THRESHOLD,
+    annotate("rect", xmin = -Inf, xmax = Inf, ymin = 0, ymax = ENDGAME_THRESHOLD_PCT,
              fill = "#E8F5E9", alpha = 0.6) +
-    annotate("text", x = min(data$Year) + 1, y = ENDGAME_THRESHOLD / 2,
+    annotate("text", x = min(data$Year) + 1, y = ENDGAME_THRESHOLD_PCT / 2,
              label = "Endgame Zone", hjust = 0, size = 3, color = "#1B5E20")
 
   # Confidence ribbon
-  if ("lower_ci" %in% names(data) && "upper_ci" %in% names(data)) {
+  lower_col <- if ("weighted_lower_ci" %in% names(data)) "weighted_lower_ci" else
+    if ("lower_ci" %in% names(data)) "lower_ci" else NULL
+  upper_col <- if ("weighted_upper_ci" %in% names(data)) "weighted_upper_ci" else
+    if ("upper_ci" %in% names(data)) "upper_ci" else NULL
+  if (!is.null(lower_col) && !is.null(upper_col)) {
     p <- p + geom_ribbon(
-      aes(ymin = lower_ci * 100, ymax = upper_ci * 100),
+      aes(ymin = !!sym(lower_col) * 100, ymax = !!sym(upper_col) * 100),
       fill = INDICATOR_COLORS[indicator], alpha = 0.2
     )
   }
@@ -510,7 +480,7 @@ plot_trend_single <- function(trend_data, indicator, country_name, gender) {
   p <- p +
     geom_vline(xintercept = BASE_YEAR, linetype = "dotted", color = "grey50") +
     geom_vline(xintercept = TARGET_YEAR, linetype = "dotted", color = "grey50") +
-    geom_hline(yintercept = ENDGAME_THRESHOLD, linetype = "dashed",
+    geom_hline(yintercept = ENDGAME_THRESHOLD_PCT, linetype = "dashed",
                color = "#1B5E20", linewidth = 0.5)
 
   # Styling
@@ -683,7 +653,7 @@ plot_validation_by_age <- function(validation_data) {
 plot_validation_by_indicator <- function(validation_data) {
 
   validation_data <- validation_data %>%
-    mutate(Indicator_Label = format_indicator_label(Indicator))
+    mutate(Indicator_Label = format_indicator(Indicator))
 
   # Calculate R² per indicator
   r2_by_ind <- validation_data %>%
@@ -735,9 +705,9 @@ plot_residuals_by_age <- function(validation_data) {
     # Zero line
     geom_hline(yintercept = 0, linetype = "dashed", color = "#1B5E20", linewidth = 0.5) +
     # Transition marker
-    geom_vline(xintercept = TRANSITION_AGE, linetype = "dashed",
+    geom_vline(xintercept = TRANSITION_START, linetype = "dashed",
                color = "orange", alpha = 0.6) +
-    annotate("text", x = TRANSITION_AGE + 1, y = max(validation_data$Residual, na.rm = TRUE) * 0.9,
+    annotate("text", x = TRANSITION_START + 1, y = max(validation_data$Residual, na.rm = TRUE) * 0.9,
              label = "Spline\u2192Linear", hjust = 0, size = 2.5, color = "orange") +
     # Points
     geom_point(alpha = 0.15, size = 0.5, color = "#2166AC") +

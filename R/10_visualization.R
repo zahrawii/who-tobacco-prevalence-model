@@ -3,7 +3,7 @@
 #                    WHO TOBACCO CONTROL PREVALENCE PROJECTION MODEL
 #                       10_visualization.R - All Plotting Functions
 #
-#   Contains: Sections 16-19 from pipeline_monolith.R
+#   Contains: Visualization functions (maps, trends, validation, cohorts)
 #     - WHO color scheme and master theme
 #     - Helper functions (format_indicator)
 #     - Data loading for visualization
@@ -20,69 +20,22 @@ cat("  VISUALIZATION MODULE\n")
 cat("================================================================\n")
 
 #########################################################################################
-#                              SECTION 16: STYLE CONFIGURATION                          #
+#                              10.1 STYLE CONFIGURATION                          #
 #########################################################################################
 
-# Color Palettes (Aligned with WHO/Lancet style)
-who_colors <- list(
-  primary   = "#2C3E50",
-  secondary = "#3498DB",
-  accent    = "#E74C3C",
-  success   = "#27AE60",
-  warning   = "#F39C12",
-  gray      = "#95A5A6"
-)
+# who_colors, format_indicator(), theme_who() defined in 00_config.R
 
-# Region Colors
+# Region Colors (7 WHO regions for exploratory maps)
 region_colors <- c(
   "Africa" = "#1f77b4", "Americas" = "#ff7f0e", "Eastern Mediterranean" = "#2ca02c",
   "Europe" = "#d62728", "South-East Asia" = "#9467bd", "Western Pacific" = "#8c564b",
   "Global" = "#2C3E50"
 )
 
-# Indicator Labels Map
-format_indicator <- function(x) {
-  case_when(
-    x == "daily_user_cigarettes" ~ "Daily Cigarettes",
-    x == "current_user_cigarettes" ~ "Current Cigarettes",
-    x == "daily_user_any_tobacco_product" ~ "Daily Any Tobacco",
-    x == "current_user_any_tobacco_product" ~ "Current Any Tobacco",
-    x == "daily_user_any_smoked_tobacco" ~ "Daily Any Smoked",
-    x == "current_user_any_smoked_tobacco" ~ "Current Any Smoked",
-    TRUE ~ gsub("_", " ", stringr::str_to_title(x))
-  )
-}
-
-# The Master Theme Function
-theme_who <- function(base_size = 11, base_family = "sans") {
-  theme_minimal(base_size = base_size, base_family = base_family) %+replace%
-    theme(
-      # Typography
-      plot.title = element_text(face = "bold", size = rel(1.2), hjust = 0, margin = margin(b = 5)),
-      plot.subtitle = element_text(color = "#555555", size = rel(1.0), hjust = 0, margin = margin(b = 10)),
-      plot.caption = element_text(color = "#777777", size = rel(0.7), hjust = 1, margin = margin(t = 10)),
-      axis.title = element_text(face = "bold", size = rel(0.9)),
-      axis.text = element_text(color = "#333333", size = rel(0.85)),
-
-      # Clean Layout (No top/right spines)
-      panel.grid.major = element_line(color = "#E5E5E5", linewidth = 0.2),
-      panel.grid.minor = element_blank(),
-      axis.line = element_line(color = "#333333", linewidth = 0.3),
-
-      # Legend
-      legend.position = "top",
-      legend.justification = "left",
-      legend.title = element_text(face = "bold", size = rel(0.8)),
-
-      # Facets
-      strip.background = element_rect(fill = "#F5F5F5", color = NA),
-      strip.text = element_text(face = "bold", size = rel(0.9), hjust = 0, margin = margin(4,4,4,4))
-    )
-}
 theme_set(theme_who())
 
 #########################################################################################
-#                              SECTION 17: VISUALIZATION DATA LOADING                   #
+#                              10.2 VISUALIZATION DATA LOADING                   #
 #########################################################################################
 
 cat("  Loading data for visualization pipeline...\n")
@@ -135,7 +88,7 @@ if (exists("clean_data")) {
 }
 
 #########################################################################################
-#                              SECTION 18: PLOT MODULES                                 #
+#                              10.3 PLOT MODULES                                 #
 #########################################################################################
 
 # ---- Module 1: Trend Plots (Trends.R equivalent) ----
@@ -278,13 +231,36 @@ plot_lexis_diagram <- function(country_code, gender, indicator) {
 
 # ---- Module 5: Maps (Maps.R equivalent) ----
 
+# Country code harmonization for WHO → Natural Earth mapping
+# Handles known mismatches (old codes, special territories)
+COUNTRY_CODE_MAP <- c(
+  "rom" = "ROU", "tmp" = "TLS", "tls" = "TLS", "pse" = "PSE", "wbg" = "PSE",
+  "zar" = "COD", "cod" = "COD", "ksv" = "XKX", "xkx" = "XKX",
+  "kor" = "KOR", "prk" = "PRK", "twn" = "TWN", "hkg" = "HKG", "mac" = "MAC",
+  "lao" = "LAO", "mmr" = "MMR", "vnm" = "VNM", "khm" = "KHM", "brn" = "BRN",
+  "civ" = "CIV", "swz" = "SWZ", "ssd" = "SSD", "som" = "SOM",
+  "mkd" = "MKD", "srb" = "SRB", "mne" = "MNE", "bih" = "BIH"
+)
+
+harmonize_country_code_for_map <- function(country_code) {
+  cc <- tolower(country_code)
+  if (cc %in% names(COUNTRY_CODE_MAP)) return(COUNTRY_CODE_MAP[cc])
+  return(toupper(cc))
+}
+
 plot_prevalence_map_dual <- function(year, indicator) {
   if (is.null(df_trends)) return(NULL)
 
   world <- ne_countries(scale = "medium", returnclass = "sf")
 
+  # Fix date line / boundary issues
+  sf::sf_use_s2(FALSE)
+  world <- tryCatch({
+    st_crop(world, xmin = -180, xmax = 180, ymin = -90, ymax = 90)
+  }, error = function(e) world)
+  sf::sf_use_s2(TRUE)
+
   # Fix Natural Earth iso_a3 = "-99" issue for France, Norway, etc.
-  # Use adm0_a3 as fallback when iso_a3 is invalid
   world <- world %>%
     mutate(
       iso_a3 = case_when(
@@ -293,22 +269,38 @@ plot_prevalence_map_dual <- function(year, indicator) {
       )
     )
 
+  # Harmonize WHO country codes to Natural Earth ISO alpha-3
   dat_map <- df_trends %>%
     filter(Year == year, Def_Type_Code == indicator) %>%
     mutate(
-      iso_a3 = toupper(Country),
+      iso_a3 = sapply(Country, harmonize_country_code_for_map),
       Gender = case_when(tolower(Sex) == "males" ~ "Men", tolower(Sex) == "females" ~ "Women", TRUE ~ Sex)
     ) %>%
     select(iso_a3, Gender, weighted_mean)
 
+  # Diagnostic: matching statistics
+  ne_iso3 <- unique(world$iso_a3)
+  ne_iso3 <- ne_iso3[!is.na(ne_iso3) & ne_iso3 != "-99"]
+  who_codes <- unique(dat_map$iso_a3)
+  matched <- who_codes[who_codes %in% ne_iso3]
+  unmatched <- who_codes[!who_codes %in% ne_iso3]
+  cat(sprintf("    Map: %d/%d countries matched to Natural Earth\n",
+              length(matched), length(who_codes)))
+  if (length(unmatched) > 0 && length(unmatched) <= 10) {
+    cat(sprintf("    Unmatched: %s\n", paste(unmatched, collapse = ", ")))
+  }
+
+  # Cross-join world with both genders, then left-join data
+  # This preserves ALL countries on the map (unmatched show as grey "No Data")
   map_data <- world %>%
-    left_join(dat_map, by = "iso_a3") %>%
-    filter(!is.na(Gender))
+    tidyr::crossing(Gender = c("Men", "Women")) %>%
+    left_join(dat_map, by = c("iso_a3", "Gender"))
 
   p <- ggplot(map_data) +
     geom_sf(aes(fill = weighted_mean), color = "white", linewidth = 0.1) +
     facet_wrap(~Gender, ncol = 1) +
-    scale_fill_viridis(option = "rocket", direction = -1, labels = scales::percent, name = "Prevalence") +
+    scale_fill_viridis(option = "rocket", direction = -1, labels = scales::percent,
+                       name = "Prevalence", na.value = "#BDBDBD") +
     theme_void() +
     theme(legend.position = "right") +
     labs(
@@ -319,7 +311,7 @@ plot_prevalence_map_dual <- function(year, indicator) {
 }
 
 #########################################################################################
-#                              SECTION 19: MASTER EXECUTION LOOP                        #
+#                              10.4 MASTER EXECUTION LOOP                        #
 #########################################################################################
 
 generate_all_visualizations <- function(output_base = "outputs/figures") {

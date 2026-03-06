@@ -3,7 +3,7 @@
 #                    WHO TOBACCO CONTROL PREVALENCE PROJECTION MODEL
 #                       08_evaluation.R - Model Evaluation & Selection
 #
-#   Contains: Section 13-14 from pipeline_monolith.R
+#   Contains: RMSE evaluation, model selection, post-selection results
 #     - RMSE calculation for global vs country models
 #     - Model selection per country-sex combination
 #     - Post-selection combined results creation
@@ -20,7 +20,7 @@ cat("================================================================\n")
 
 dir.create("evaluation", showWarnings = FALSE)
 
-# ---- 13.1 Prepare Observed Data ----
+# ---- 8.1 Prepare Observed Data ----
 
 observed_data <- clean_data %>%
   mutate(
@@ -33,7 +33,7 @@ observed_data <- clean_data %>%
          Prevalence, Data_Type) %>%
   rename(Indicator = def_type_code, Sex = sex, Country = wb_country_abv)
 
-# ---- 13.2 Prepare Model Predictions ----
+# ---- 8.2 Prepare Model Predictions ----
 
 global_ac_predictions <- final_ac_predictions %>%
   mutate(Year = as.numeric(Year), Data_Type = "Global_Model") %>%
@@ -49,7 +49,7 @@ country_ac_predictions <- final_predictions_country_specific_ac %>%
 
 all_ac_predictions <- bind_rows(global_ac_predictions, country_ac_predictions)
 
-# ---- 13.3 Calculate RMSE ----
+# ---- 8.3 Calculate RMSE ----
 
 calculate_rmse <- function(country_code, gender, indicator) {
   obs_data <- observed_data %>%
@@ -143,7 +143,7 @@ for (country in unique_countries) {
 
 rmse_df <- bind_rows(rmse_results)
 
-# ---- 13.4 Create Country-Sex Summary ----
+# ---- 8.4 Create Country-Sex Summary ----
 
 country_sex_summary <- rmse_df %>%
   filter(N_Observations > 0, !is.na(Selected_Model)) %>%
@@ -237,7 +237,7 @@ cat(sprintf("  Country-Sex combinations using country model: %d\n",
 
 
 #########################################################################################
-#                  SECTION 14: CREATE POST-SELECTION COMBINED RESULTS                   #
+#                  POST-SELECTION COMBINED RESULTS                   #
 #########################################################################################
 
 cat("\n  Creating post-selection combined weighted results...\n")
