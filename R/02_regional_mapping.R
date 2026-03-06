@@ -127,20 +127,43 @@ country_region_manual <- tribble(
   "lva", "Northern Europe", "ltu", "Northern Europe"
 )
 
-# ---- 2.2 Map Countries to Regions ----
+# ---- 2.2 Extend country_name_mapping to ALL countries ----
+# No-data countries get uppercase ISO code as directory name
+# This ensures reverse lookup works for processing/ directories
 
-country_region_mapping <- clean_data %>%
-  select(wb_country_abv) %>%
-  distinct() %>%
-  left_join(country_region_manual, by = "wb_country_abv") %>%
-  mutate(region_consolidated = if_else(is.na(region_consolidated), "Other", region_consolidated))
+all_manual_codes <- country_region_manual$wb_country_abv
+missing_codes <- all_manual_codes[!all_manual_codes %in% names(country_name_mapping)]
+if (length(missing_codes) > 0) {
+  for (code in missing_codes) {
+    country_name_mapping[code] <- toupper(code)
+  }
+  cat(sprintf("  Extended country_name_mapping: +%d no-data countries (total: %d)\n",
+              length(missing_codes), length(country_name_mapping)))
+}
+
+# ---- 2.3 Map Countries to Regions ----
+# Use ALL 197 countries from manual list (not just data countries)
+# This ensures no-data countries flow through aggregation and visualization
+
+country_region_mapping <- country_region_manual %>%
+  distinct(wb_country_abv, .keep_all = TRUE)
+
+# Safety net: include data countries not in manual list
+data_only_codes <- setdiff(unique(clean_data$wb_country_abv),
+                           country_region_mapping$wb_country_abv)
+if (length(data_only_codes) > 0) {
+  country_region_mapping <- bind_rows(
+    country_region_mapping,
+    tibble(wb_country_abv = data_only_codes, region_consolidated = "Other")
+  )
+}
 
 clean_data <- clean_data %>%
   select(-region) %>%
   left_join(country_region_mapping, by = "wb_country_abv") %>%
   rename(region = region_consolidated)
 
-# ---- 2.3 Export Regional Mapping ----
+# ---- 2.4 Export Regional Mapping ----
 
 write.csv(
   country_region_manual %>%

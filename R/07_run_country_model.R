@@ -4,8 +4,8 @@
 #                    07_run_country_model.R - Country-Specific Model Fitting
 #                                   VERSION 2.4.0
 #
-#   Contains: Section 11-12 from pipeline_monolith.R
-#     - Country-specific model fitting loop (all 191 countries x 2 sexes)
+#   Contains: Country-specific model fitting, prediction, weighted results
+#     - Country-specific model fitting loop (all countries x 2 sexes)
 #     - Vectorized prediction with OPT-2 through OPT-6 optimizations
 #     - SUBPROCESS ISOLATION: Each country runs in a fresh R process via callr
 #       to prevent DLL accumulation and progressive RAM growth
@@ -29,7 +29,7 @@
 #   Requires: Global model fitted (06_run_global_model.R), country_priors/ directory
 #   Outputs: final_predictions_country_specific.csv, country_specific_ac_nested/
 #
-#   EXTRACTED FROM: pipeline_monolith.R v2.3.2
+#   Originally extracted from monolith, now the canonical source
 #
 #########################################################################################
 
@@ -781,7 +781,7 @@ cat("\nCountry-specific model fitting complete (NIMBLE)\n")
 #########################################################################################
 #           TARGET PREVALENCE CALCULATION (COUNTRY-SPECIFIC MODEL)
 #
-#   Corresponds to the second half of Section 9 in pipeline_monolith.R
+#   Target prevalence calculation for country-specific models
 #   Calculates base-year weighted prevalence and target thresholds
 #   using the country-specific model predictions saved to disk.
 #
@@ -914,7 +914,7 @@ cat("Target prevalence calculation complete (both models)\n")
 #########################################################################################
 #           WEIGHTED PREVALENCE TRENDS (COUNTRY-SPECIFIC MODEL)
 #
-#   Corresponds to Section 12 in pipeline_monolith.R
+#   Weighted prevalence trends for country-specific models
 #   Calculates population-weighted prevalence and target achievement probabilities
 #   using the country-specific model predictions saved to disk.
 #
