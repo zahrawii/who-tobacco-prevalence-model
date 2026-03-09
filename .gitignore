@@ -47,3 +47,8 @@ Thumbs.db
 
 # Local documentation (not for repo)
 expertsdiscuss.md
+finalextensivekawaiiguide.md
+example/
+
+# Local tool config
+.claude/
