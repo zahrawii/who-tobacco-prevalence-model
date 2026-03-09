@@ -34,7 +34,7 @@ if (!file.exists("data")) {
 # Run modular pipeline (phases can be run independently)
 # ============================================================================
 
-run_modular_pipeline <- function(phases = c("prep", "global", "country", "eval", "agg", "viz")) {
+run_modular_pipeline <- function(phases = c("prep", "global", "country", "eval", "agg", "viz", "tables")) {
 
   # ---- Phase 1: Configuration and Data Preparation ----
   if ("prep" %in% phases) {
@@ -155,15 +155,6 @@ run_modular_pipeline <- function(phases = c("prep", "global", "country", "eval",
     # Generate all basic/exploratory plots
     generate_all_visualizations()
 
-    # ---- Publication Tables ----
-    cat("\n  Generating publication tables...\n")
-    tryCatch({
-      source("R/11_publication_tables.R")
-    }, error = function(e) {
-      cat(sprintf("  WARNING: Publication tables failed: %s\n", e$message))
-      cat("  Continuing with pipeline...\n")
-    })
-
     # ---- Publication Figures ----
     cat("\n  Generating publication figures...\n")
     tryCatch({
@@ -210,6 +201,28 @@ run_modular_pipeline <- function(phases = c("prep", "global", "country", "eval",
     cat("\nPhase 6 complete. Visualizations generated.\n")
   }
 
+  # ---- Phase 7: Publication Tables ----
+  if ("tables" %in% phases) {
+    cat("\n======= PHASE 7: Publication Tables =======\n")
+
+    # Load checkpoint if needed
+    if (!exists("final_weighted_results_selected")) {
+      if (file.exists("checkpoints/phase5_agg.RData")) {
+        load("checkpoints/phase5_agg.RData")
+      } else {
+        stop("Phase 5 must be run first.")
+      }
+    }
+
+    tryCatch({
+      source("R/11_publication_tables.R")
+    }, error = function(e) {
+      cat(sprintf("  ERROR: Publication tables failed: %s\n", e$message))
+    })
+
+    cat("\nPhase 7 complete. Publication tables generated.\n")
+  }
+
   # ---- Completion ----
   cat("
 #########################################################################
@@ -254,6 +267,7 @@ Pipeline loaded. Available commands:
   run_modular_pipeline('eval')      - Run only Phase 4 (evaluation)
   run_modular_pipeline('agg')       - Run only Phase 5 (aggregation)
   run_modular_pipeline('viz')       - Run only Phase 6 (visualization)
+  run_modular_pipeline('tables')    - Run only Phase 7 (publication tables)
 
 Individual module files:
   R/00_config.R            - Configuration and constants

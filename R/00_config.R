@@ -145,12 +145,21 @@ INDICATOR_CODES <- c(
 )
 
 INDICATOR_COLORS <- c(
-  "current_user_any_tobacco_product" = "#E41A1C",
-  "current_user_any_smoked_tobacco"  = "#377EB8",
-  "current_user_cigarettes"          = "#4DAF4A",
-  "daily_user_any_tobacco_product"   = "#984EA3",
-  "daily_user_any_smoked_tobacco"    = "#FF7F00",
-  "daily_user_cigarettes"            = "#A65628"
+  "current_user_cigarettes"          = "#ED7D31",   # Protagonist
+  "current_user_any_smoked_tobacco"  = "#5B9BD5",
+  "current_user_any_tobacco_product" = "#70AD47",
+  "daily_user_cigarettes"            = "#E07B91",
+  "daily_user_any_smoked_tobacco"    = "#A679C7",
+  "daily_user_any_tobacco_product"   = "#4ECDC4"
+)
+
+INDICATOR_COLORS_LIGHT <- c(
+  "current_user_cigarettes"          = "#F8CBAD",
+  "current_user_any_smoked_tobacco"  = "#BDD7EE",
+  "current_user_any_tobacco_product" = "#C5E0B4",
+  "daily_user_cigarettes"            = "#F4B6C2",
+  "daily_user_any_smoked_tobacco"    = "#D5B8E8",
+  "daily_user_any_tobacco_product"   = "#B2EBE4"
 )
 
 # ---- Sex/Gender Standardization ----
@@ -173,29 +182,105 @@ format_indicator <- function(x) {
          gsub("_", " ", tools::toTitleCase(x)))
 }
 
-# ---- WHO Publication Theme ----
+# ---- Academic Kawaii Design System ----
+# Based on the Academic Kawaii figure design guide.
+# Soft-but-vivid palettes, four-tier text hierarchy, off-white canvas.
 
+# Primary Six palette
+KAWAII_PRIMARY <- c("#5B9BD5", "#ED7D31", "#70AD47", "#E07B91", "#A679C7", "#4ECDC4")
+KAWAII_LIGHT   <- c("#BDD7EE", "#F8CBAD", "#C5E0B4", "#F4B6C2", "#D5B8E8", "#B2EBE4")
+
+KAWAII_BLUE   <- "#5B9BD5"
+KAWAII_ORANGE <- "#ED7D31"   # Protagonist color
+KAWAII_GREEN  <- "#70AD47"
+KAWAII_ROSE   <- "#E07B91"
+KAWAII_PURPLE <- "#A679C7"
+KAWAII_TEAL   <- "#4ECDC4"
+
+# Diverging palette (maps, heatmaps with midpoint)
+KAWAII_DIVERGING  <- c("#2166AC", "#67A9CF", "#E8E8E8", "#EF8A62", "#B2182B")
+
+# Sequential palette (counts, burden, severity)
+KAWAII_SEQUENTIAL <- c("#F0F0F0", "#FDD49E", "#FC8D59", "#D7301F", "#7F0000")
+
+# Four-tier text color hierarchy
+TEXT_TIER1 <- "#1A1A1A"   # Titles
+TEXT_TIER2 <- "#374151"   # Axis titles, strip text, bold annotations
+TEXT_TIER3 <- "#6B7280"   # Axis text, subtitles, legend text
+TEXT_TIER4 <- "#9CA3AF"   # Captions, whisper notes
+
+# Reference line colors
+REF_NULL      <- "#B0B0B0"   # Null/reference: dashed, linewidth 0.5
+REF_THRESHOLD <- "#70AD47"   # Target/threshold: dotted, linewidth 0.6
+REF_EVENT     <- "#C62828"   # Event marker: dashed, linewidth 0.8
+
+# Legacy alias (backward compat for R/10_visualization.R)
 who_colors <- list(
-  primary = "#2C3E50", secondary = "#3498DB", accent = "#E74C3C",
-  success = "#27AE60", warning = "#F39C12", gray = "#95A5A6"
+  primary = KAWAII_BLUE, secondary = KAWAII_ORANGE, accent = KAWAII_ROSE,
+  success = KAWAII_GREEN, warning = KAWAII_ORANGE, gray = "#9CA3AF"
 )
+
+# ---- Base Theme (Kawaii Section 16) ----
 
 theme_who <- function(base_size = 11, base_family = "sans") {
   ggplot2::theme_minimal(base_size = base_size, base_family = base_family) %+replace%
     ggplot2::theme(
-      plot.title    = element_text(face = "bold", size = rel(1.2), hjust = 0, margin = margin(b = 5)),
-      plot.subtitle = element_text(color = "#555555", size = rel(1.0), hjust = 0, margin = margin(b = 10)),
-      plot.caption  = element_text(color = "#777777", size = rel(0.7), hjust = 1, margin = margin(t = 10)),
-      axis.title    = element_text(face = "bold", size = rel(0.9)),
-      axis.text     = element_text(color = "#333333", size = rel(0.85)),
-      panel.grid.major = element_line(color = "#E5E5E5", linewidth = 0.2),
-      panel.grid.minor = element_blank(),
-      axis.line     = element_line(color = "#333333", linewidth = 0.3),
-      legend.position      = "top",
-      legend.justification = "left",
-      legend.title  = element_text(face = "bold", size = rel(0.8)),
-      strip.background = element_rect(fill = "#F5F5F5", color = NA),
-      strip.text    = element_text(face = "bold", size = rel(0.9), hjust = 0, margin = margin(4, 4, 4, 4))
+      plot.background       = element_rect(fill = "white", color = NA),
+      panel.background      = element_rect(fill = "#FAFAFA", color = NA),
+      panel.grid.minor      = element_blank(),
+      panel.grid.major      = element_line(color = "#ECECEC", linewidth = 0.3),
+      plot.title            = element_text(size = 13, face = "bold", color = "#1A1A1A",
+                                           margin = margin(b = 4)),
+      plot.subtitle         = element_text(size = 11, color = "#6B7280",
+                                           margin = margin(b = 10)),
+      plot.caption          = element_text(size = 8, color = "#9CA3AF", hjust = 0,
+                                           face = "italic", margin = margin(t = 10)),
+      axis.title            = element_text(size = 11, color = "#374151"),
+      axis.text             = element_text(size = 10, color = "#6B7280"),
+      strip.text            = element_text(size = 11, face = "bold", color = "#374151"),
+      strip.background      = element_rect(fill = "#F0F0F0", color = NA),
+      legend.position       = "bottom",
+      legend.direction      = "horizontal",
+      legend.title          = element_text(size = 10, face = "bold", color = "#374151"),
+      legend.text           = element_text(size = 9, color = "#6B7280"),
+      legend.key.height     = unit(0.4, "cm"),
+      legend.key.width      = unit(0.8, "cm"),
+      legend.margin         = margin(t = 4),
+      plot.margin           = margin(12, 16, 12, 12),
+      panel.spacing         = unit(0.8, "lines"),
+      plot.title.position   = "plot",
+      plot.caption.position = "plot"
+    )
+}
+
+# ---- Map Theme (Kawaii Section 11, Recipe 7) ----
+
+theme_who_map <- function(base_size = 11, base_family = "sans") {
+  ggplot2::theme_void(base_size = base_size, base_family = base_family) %+replace%
+    ggplot2::theme(
+      plot.background       = element_rect(fill = "white", color = NA),
+      panel.background      = element_rect(fill = "#F5F8FC", color = NA),
+      plot.title            = element_text(size = 13, face = "bold", color = "#1A1A1A",
+                                           hjust = 0.5, margin = margin(t = 10, b = 4)),
+      plot.subtitle         = element_text(size = 11, color = "#6B7280", hjust = 0.5,
+                                           lineheight = 1.2, margin = margin(b = 12)),
+      plot.caption          = element_text(size = 8, color = "#9CA3AF", hjust = 0,
+                                           face = "italic", margin = margin(t = 12)),
+      strip.text            = element_text(size = 11, face = "bold", color = "#374151",
+                                           margin = margin(t = 8, b = 6)),
+      strip.background      = element_rect(fill = "#F0F0F0", color = NA),
+      legend.position       = "bottom",
+      legend.direction      = "horizontal",
+      legend.title          = element_text(size = 10, face = "bold", color = "#374151",
+                                           margin = margin(b = 4)),
+      legend.text           = element_text(size = 9, color = "#6B7280"),
+      legend.key.height     = unit(0.4, "cm"),
+      legend.key.width      = unit(0.8, "cm"),
+      legend.margin         = margin(t = 8),
+      plot.margin           = margin(12, 16, 12, 12),
+      panel.spacing         = unit(0.8, "lines"),
+      plot.title.position   = "plot",
+      plot.caption.position = "plot"
     )
 }
 

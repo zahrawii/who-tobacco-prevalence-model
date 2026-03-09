@@ -8,7 +8,7 @@
 #     - Figure 1: Stoplight World Map (WHO Target Achievement Probability)
 #     - Figure 2: Caterpillar Plot (Country Ranking by Reduction)
 #     - Figure 3: Endgame Trajectories (Spaghetti Plot with <5% Zone)
-#     - Figure 4: Age-Cohort Heatmap (Lexis Diagram)
+#     - Figure 4: Birth Cohort Prevalence Trajectories
 #     - eFigure 1: Model Validation (Observed vs Predicted)
 #     - eFigure 2: Country Age Profiles (Fitted vs Observed with Age Bands)
 #     - eFigure 3: Weighted Trend Curves (Time Series with Uncertainty)
@@ -48,19 +48,19 @@ suppressPackageStartupMessages({
 # Create output directories
 output_dirs <- c(
   # Maps with target/gender subdirectories
-  "outputs/figures/maps",
-  "outputs/figures/maps/2025_target/men",
-  "outputs/figures/maps/2025_target/women",
-  "outputs/figures/maps/2040_endgame/men",
-  "outputs/figures/maps/2040_endgame/women",
-  "outputs/figures/maps/composites",
+  "figures_publication/maps",
+  "figures_publication/maps/2025_target/men",
+  "figures_publication/maps/2025_target/women",
+  "figures_publication/maps/2040_endgame/men",
+  "figures_publication/maps/2040_endgame/women",
+  "figures_publication/maps/composites",
   # Other figures
-  "outputs/figures/caterpillar",
-  "outputs/figures/trajectories",
-  "outputs/figures/heatmaps",
-  "outputs/figures/validation",
-  "outputs/figures/age_profiles",
-  "outputs/figures/trends"
+  "figures_publication/caterpillar",
+  "figures_publication/trajectories",
+  "figures_publication/cohorts",
+  "figures_publication/validation",
+  "figures_publication/age_profiles",
+  "figures_publication/trends"
 )
 for (d in output_dirs) {
   dir.create(d, recursive = TRUE, showWarnings = FALSE)
@@ -153,12 +153,12 @@ assert_valid_indicators <- function(data, indicator_col = "def_type_code", conte
 # Lancet-style stoplight colors for probability categories
 # Refined for: print quality, colorblind accessibility, visual balance
 stoplight_colors <- c(
-  "Very High (>90%)"    = "#1B5E20",   # Deep forest green
-  "High (60-90%)"       = "#4CAF50",   # Balanced green
-  "Moderate (40-60%)"   = "#FF9800",   # Deep amber/orange (not yellow)
-  "Low (10-40%)"        = "#E57373",   # Soft coral red
-  "Very Low (<10%)"     = "#B71C1C",   # Deep red
-  "No Data"             = "#BDBDBD"    # Medium gray (visible)
+  "Very High (>90%)"    = "#2166AC",   # Deep blue (strong positive)
+  "High (60-90%)"       = "#67A9CF",   # Mid blue
+  "Moderate (40-60%)"   = "#E8E8E8",   # Neutral
+  "Low (10-40%)"        = "#EF8A62",   # Warm orange
+  "Very Low (<10%)"     = "#B2182B",   # Deep red
+  "No Data"             = "#D5D5D5"    # Soft gray
 )
 
 # ============================================================================
@@ -272,11 +272,11 @@ preflight_visualization_check <- function(weighted_results, predictions = NULL, 
 # ============================================================================
 
 # Map background colors
-OCEAN_COLOR       <- "#DAE8F5"    # Soft blue for oceans
-LAND_NO_DATA      <- "#BDBDBD"    # Gray for countries without data
+OCEAN_COLOR       <- "#F5F8FC"    # Kawaii faint ocean blue
+LAND_NO_DATA      <- "#D5D5D5"    # Soft gray for countries without data
 BORDER_COLOR      <- "#FFFFFF"    # White country borders
-BORDER_WIDTH      <- 0.25         # Border line width
-COASTLINE_COLOR   <- "#90A4AE"    # Subtle coastline emphasis
+BORDER_WIDTH      <- 0.15         # Thinner borders for cleaner look
+COASTLINE_COLOR   <- "#B0B0B0"    # Subtle coastline
 
 # ============================================================================
 # A4 PAGE DIMENSIONS (for Lancet submission)
@@ -292,19 +292,19 @@ FIG_HEIGHT <- 10.0  # inches (~254mm usable)
 
 # Region colors (colorblind-friendly)
 region_colors <- c(
-  "Central Asia" = "#E41A1C",
-  "Eastern Asia" = "#377EB8",
-  "Eastern Europe" = "#4DAF4A",
-  "Latin America & Caribbean" = "#984EA3",
-  "North Africa & Middle East" = "#FF7F00",
-  "Northern Europe" = "#A65628",
-  "Oceania & Pacific" = "#F781BF",
-  "South America" = "#999999",
-  "South Asia" = "#66C2A5",
-  "South-East Asia" = "#FC8D62",
-  "Sub-Saharan Africa" = "#8DA0CB",
-  "Western Europe" = "#E78AC3",
-  "Other" = "#A6D854"
+  "Central Asia"               = "#5B9BD5",
+  "Eastern Asia"               = "#ED7D31",
+  "Eastern Europe"             = "#70AD47",
+  "Latin America & Caribbean"  = "#E07B91",
+  "North Africa & Middle East" = "#A679C7",
+  "Northern Europe"            = "#4ECDC4",
+  "Oceania & Pacific"          = "#BDD7EE",
+  "South America"              = "#F8CBAD",
+  "South Asia"                 = "#C5E0B4",
+  "South-East Asia"            = "#F4B6C2",
+  "Sub-Saharan Africa"         = "#D5B8E8",
+  "Western Europe"             = "#B2EBE4",
+  "Other"                      = "#D5D5D5"
 )
 
 # who_colors defined in 00_config.R
@@ -473,75 +473,9 @@ categorize_probability <- function(prob) {
 #'
 #' @param base_size Base font size (default 11)
 #' @param base_family Font family (default sans-serif)
-theme_lancet_map <- function(base_size = 11, base_family = "sans") {
-  theme_void(base_size = base_size, base_family = base_family) %+replace%
-    theme(
-      # === TITLE BLOCK ===
-      plot.title = element_text(
-        face = "bold",
-        size = 16,
-        hjust = 0.5,
-        color = "#1A1A1A",
-        margin = margin(t = 10, b = 5)
-      ),
-      plot.subtitle = element_text(
-        size = 11,
-        hjust = 0.5,
-        color = "#4A4A4A",
-        lineheight = 1.2,
-        margin = margin(b = 20)
-      ),
-      plot.caption = element_text(
-        size = 8,
-        hjust = 0,
-        color = "#666666",
-        lineheight = 1.3,
-        margin = margin(t = 20)
-      ),
+# theme_who_map() removed — use theme_who_map() from 00_config.R
 
-      # === FACET STRIPS (Men/Women) ===
-      strip.text = element_text(
-        face = "bold",
-        size = 13,
-        hjust = 0.5,
-        color = "#2C3E50",
-        margin = margin(t = 12, b = 8)
-      ),
-      strip.background = element_rect(fill = "#F8F9FA", color = NA),
-      panel.spacing.y = unit(0.8, "cm"),
-      panel.spacing.x = unit(0.4, "cm"),
-
-      # === LEGEND (Bottom, Horizontal) ===
-      legend.position = "bottom",
-      legend.direction = "horizontal",
-      legend.justification = "center",
-      legend.box.just = "center",
-      legend.title = element_text(
-        face = "bold",
-        size = 10,
-        color = "#333333",
-        margin = margin(b = 8)
-      ),
-      legend.text = element_text(
-        size = 9,
-        color = "#4A4A4A",
-        margin = margin(t = 3)
-      ),
-      legend.key.width = unit(1.3, "cm"),
-      legend.key.height = unit(0.5, "cm"),
-      legend.spacing.x = unit(0.15, "cm"),
-      legend.margin = margin(t = 15, b = 10),
-      legend.box.margin = margin(t = 5),
-
-      # === OVERALL LAYOUT ===
-      plot.margin = margin(t = 15, r = 20, b = 15, l = 20),
-      plot.background = element_rect(fill = "white", color = NA),
-      panel.background = element_rect(fill = OCEAN_COLOR, color = NA)
-    )
-}
-
-#' Legend guide for Lancet maps
-#' Forces all categories to show, proper formatting
+#' Legend guide for publication maps
 lancet_legend_guide <- function() {
   guides(fill = guide_legend(
     nrow = 1,
@@ -549,11 +483,11 @@ lancet_legend_guide <- function() {
     title.hjust = 0.5,
     label.position = "bottom",
     reverse = FALSE,
-    keywidth = unit(1.3, "cm"),
-    keyheight = unit(0.5, "cm"),
+    keywidth = unit(0.8, "cm"),
+    keyheight = unit(0.4, "cm"),
     override.aes = list(
-      color = "#666666",
-      linewidth = 0.4
+      color = "#B0B0B0",
+      linewidth = 0.3
     )
   ))
 }
@@ -717,10 +651,10 @@ create_figure1_map <- function(weighted_results,
     inset_element(fig1_inset, left = 0.02, bottom = 0.02, right = 0.35, top = 0.25)
 
   # Save
-  ggsave("outputs/figures/maps/Figure1_Stoplight_Map.pdf", fig1_combined, width = 12, height = 14)
-  ggsave("outputs/figures/maps/Figure1_Stoplight_Map.png", fig1_combined, width = 12, height = 14, dpi = 300)
+  ggsave("figures_publication/maps/Figure1_Stoplight_Map.pdf", fig1_combined, width = 12, height = 14, bg = "white")
+  ggsave("figures_publication/maps/Figure1_Stoplight_Map.png", fig1_combined, width = 12, height = 14, dpi = 300, bg = "white")
 
-  cat("  Saved: outputs/figures/maps/Figure1_Stoplight_Map.pdf\n")
+  cat("  Saved: figures_publication/maps/Figure1_Stoplight_Map.pdf\n")
 
   return(fig1_combined)
 }
@@ -814,7 +748,7 @@ create_probability_map <- function(prob_data,
                                     indicator,
                                     gender,
                                     target_type,
-                                    output_dir = "outputs/figures/maps") {
+                                    output_dir = "figures_publication/maps") {
 
   cat(sprintf("  Creating map: %s | %s | %s...\n",
               INDICATOR_CODES[indicator], gender, target_type))
@@ -883,8 +817,8 @@ create_probability_map <- function(prob_data,
 
   # Save
   filename_base <- paste0(INDICATOR_CODES[indicator], "_", tolower(gender))
-  ggsave(file.path(target_dir, paste0(filename_base, ".pdf")), p, width = 12, height = 7)
-  ggsave(file.path(target_dir, paste0(filename_base, ".png")), p, width = 12, height = 7, dpi = 300)
+  ggsave(file.path(target_dir, paste0(filename_base, ".pdf")), p, width = 12, height = 7, bg = "white")
+  ggsave(file.path(target_dir, paste0(filename_base, ".png")), p, width = 12, height = 7, dpi = 300, bg = "white")
 
   return(p)
 }
@@ -909,7 +843,7 @@ create_probability_map <- function(prob_data,
 create_lancet_indicator_map <- function(prob_data,
                                          indicator,
                                          target_type,
-                                         output_dir = "outputs/figures/maps") {
+                                         output_dir = "figures_publication/maps") {
 
   cat(sprintf("  Creating Lancet map: %s | %s...\n",
               INDICATOR_LABELS[indicator], target_type))
@@ -982,7 +916,7 @@ create_lancet_indicator_map <- function(prob_data,
       clip = "on"
     ) +
     # Theme and legend
-    theme_lancet_map() +
+    theme_who_map() +
     lancet_legend_guide() +
     # Labels
     labs(
@@ -1001,9 +935,9 @@ create_lancet_indicator_map <- function(prob_data,
   # Save with A4 vertical dimensions
   filename_base <- INDICATOR_CODES[indicator]
   ggsave(file.path(target_dir, paste0(filename_base, ".pdf")),
-         p, width = FIG_WIDTH, height = FIG_HEIGHT, units = "in")
+         p, width = FIG_WIDTH, height = FIG_HEIGHT, units = "in", bg = "white")
   ggsave(file.path(target_dir, paste0(filename_base, ".png")),
-         p, width = FIG_WIDTH, height = FIG_HEIGHT, units = "in", dpi = 300)
+         p, width = FIG_WIDTH, height = FIG_HEIGHT, units = "in", dpi = 300, bg = "white")
 
   cat(sprintf("    Saved: %s/%s.pdf (A4 vertical)\n", target_type, filename_base))
 
@@ -1018,7 +952,7 @@ create_lancet_indicator_map <- function(prob_data,
 #' @param prob_data Probability data
 #' @param output_dir Output directory
 #' @return Combined ggplot
-create_lancet_main_figure <- function(prob_data, output_dir = "outputs/figures/maps") {
+create_lancet_main_figure <- function(prob_data, output_dir = "figures_publication/maps") {
 
   cat("  Creating Lancet main figure: Current Cigarettes (2x2 facet)...\n")
 
@@ -1089,7 +1023,7 @@ create_lancet_main_figure <- function(prob_data, output_dir = "outputs/figures/m
       expand = FALSE
     ) +
     # Theme
-    theme_lancet_map() +
+    theme_who_map() +
     theme(
       strip.text = element_text(
         face = "bold",
@@ -1119,9 +1053,9 @@ create_lancet_main_figure <- function(prob_data, output_dir = "outputs/figures/m
 
   dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
   ggsave(file.path(output_dir, "Figure1_Main.pdf"),
-         p, width = MAIN_FIG_WIDTH, height = MAIN_FIG_HEIGHT, units = "in")
+         p, width = MAIN_FIG_WIDTH, height = MAIN_FIG_HEIGHT, units = "in", bg = "white")
   ggsave(file.path(output_dir, "Figure1_Main.png"),
-         p, width = MAIN_FIG_WIDTH, height = MAIN_FIG_HEIGHT, units = "in", dpi = 300)
+         p, width = MAIN_FIG_WIDTH, height = MAIN_FIG_HEIGHT, units = "in", dpi = 300, bg = "white")
 
   cat("    Saved: Figure1_Main.pdf (8.5 x 10.0 in)\n")
 
@@ -1138,7 +1072,7 @@ create_lancet_main_figure <- function(prob_data, output_dir = "outputs/figures/m
 create_faceted_indicator_map <- function(prob_data,
                                           gender,
                                           target_type,
-                                          output_dir = "outputs/figures/maps") {
+                                          output_dir = "figures_publication/maps") {
 
   cat(sprintf("  Creating faceted map: All indicators | %s | %s...\n", gender, target_type))
 
@@ -1212,8 +1146,8 @@ create_faceted_indicator_map <- function(prob_data,
   dir.create(target_dir, recursive = TRUE, showWarnings = FALSE)
 
   filename <- paste0("all_indicators_", target_type, "_", tolower(gender))
-  ggsave(file.path(target_dir, paste0(filename, ".pdf")), p, width = 16, height = 10)
-  ggsave(file.path(target_dir, paste0(filename, ".png")), p, width = 16, height = 10, dpi = 300)
+  ggsave(file.path(target_dir, paste0(filename, ".pdf")), p, width = 16, height = 10, bg = "white")
+  ggsave(file.path(target_dir, paste0(filename, ".png")), p, width = 16, height = 10, dpi = 300, bg = "white")
 
   cat(sprintf("    Saved: %s/%s.pdf\n", target_dir, filename))
 
@@ -1225,7 +1159,7 @@ create_faceted_indicator_map <- function(prob_data,
 #' @param prob_data Probability data
 #' @param output_dir Output directory
 #' @return Combined ggplot
-create_main_cigarettes_map <- function(prob_data, output_dir = "outputs/figures/maps") {
+create_main_cigarettes_map <- function(prob_data, output_dir = "figures_publication/maps") {
 
   cat("  Creating main publication map: Current Cigarettes (2x2 facet)...\n")
 
@@ -1286,8 +1220,8 @@ create_main_cigarettes_map <- function(prob_data, output_dir = "outputs/figures/
 
   # Save
   dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
-  ggsave(file.path(output_dir, "Figure1_Main_Current_Cigarettes.pdf"), p, width = 14, height = 12)
-  ggsave(file.path(output_dir, "Figure1_Main_Current_Cigarettes.png"), p, width = 14, height = 12, dpi = 300)
+  ggsave(file.path(output_dir, "Figure1_Main_Current_Cigarettes.pdf"), p, width = 14, height = 12, bg = "white")
+  ggsave(file.path(output_dir, "Figure1_Main_Current_Cigarettes.png"), p, width = 14, height = 12, dpi = 300, bg = "white")
 
   cat("    Saved: Figure1_Main_Current_Cigarettes.pdf\n")
 
@@ -1430,7 +1364,7 @@ prepare_all_probability_data <- function(weighted_results, mcmc_samples = NULL) 
 #' @param lancet_style If TRUE, use Lancet A4 format (default TRUE)
 generate_all_probability_maps <- function(weighted_results,
                                            mcmc_samples = NULL,
-                                           output_dir = "outputs/figures/maps",
+                                           output_dir = "figures_publication/maps",
                                            primary_only = FALSE,
                                            lancet_style = TRUE) {
 
@@ -1577,15 +1511,16 @@ create_figure2_caterpillar <- function(reduction_data,
 
   fig2 <- ggplot(plot_data, aes(x = Reduction_Mean, y = Country_Display)) +
     # Target line (30%)
-    geom_vline(xintercept = 30, linetype = "dashed", color = "#B71C1C", linewidth = 0.8) +
-    annotate("text", x = 31, y = 1, label = "30% Target", color = "#B71C1C",
+    geom_vline(xintercept = 30, linetype = "dotted", color = REF_THRESHOLD, linewidth = 0.6) +
+    annotate("label", x = 31, y = 1, label = "30% Target", color = TEXT_TIER2,
+             fill = alpha("white", 0.9), label.size = 0,
              hjust = 0, size = 3, fontface = "bold") +
     # Error bars (95% CrI)
     geom_errorbarh(aes(xmin = Reduction_Lower, xmax = Reduction_Upper,
                        color = if("Region" %in% names(plot_data)) Region else NULL),
                    height = 0, linewidth = 0.4, alpha = 0.6) +
     # Point estimates
-    geom_point(aes(color = if("Region" %in% names(plot_data)) Region else NULL), size = 1.5) +
+    geom_point(aes(color = if("Region" %in% names(plot_data)) Region else NULL), size = 2.5) +
     theme_who() +
     theme(
       legend.position = "bottom",
@@ -1604,12 +1539,12 @@ create_figure2_caterpillar <- function(reduction_data,
   }
 
   # Save with dynamic height
-  ggsave(paste0("outputs/figures/caterpillar/Figure2_Caterpillar_", gender_filter, ".pdf"),
-         fig2, width = 10, height = plot_height)
-  ggsave(paste0("outputs/figures/caterpillar/Figure2_Caterpillar_", gender_filter, ".png"),
-         fig2, width = 10, height = plot_height, dpi = 300)
+  ggsave(paste0("figures_publication/caterpillar/Figure2_Caterpillar_", gender_filter, ".pdf"),
+         fig2, width = 10, height = plot_height, bg = "white")
+  ggsave(paste0("figures_publication/caterpillar/Figure2_Caterpillar_", gender_filter, ".png"),
+         fig2, width = 10, height = plot_height, dpi = 300, bg = "white")
 
-  cat(sprintf("  Saved: outputs/figures/caterpillar/Figure2_Caterpillar_%s.pdf\n", gender_filter))
+  cat(sprintf("  Saved: figures_publication/caterpillar/Figure2_Caterpillar_%s.pdf\n", gender_filter))
 
   return(fig2)
 }
@@ -1651,19 +1586,19 @@ create_figure3_trajectories <- function(trend_data,
   fig3 <- ggplot() +
     # Endgame zone (green rectangle)
     annotate("rect", xmin = -Inf, xmax = Inf, ymin = 0, ymax = ENDGAME_THRESHOLD_PCT,
-             fill = "#E8F5E9", alpha = 0.8) +
+             fill = KAWAII_GREEN, alpha = 0.06) +
     annotate("text", x = min(plot_data$Year), y = ENDGAME_THRESHOLD_PCT / 2,
              label = paste0("Endgame Zone (<", ENDGAME_THRESHOLD_PCT, "%)"),
-             hjust = 0, vjust = 0.5, size = 3, fontface = "italic", color = "#1B5E20") +
+             hjust = 0, vjust = 0.5, size = 3, fontface = "italic", color = TEXT_TIER4) +
 
     # Near-endgame zone
     annotate("rect", xmin = -Inf, xmax = Inf, ymin = ENDGAME_THRESHOLD_PCT, ymax = NEAR_ENDGAME_PCT,
-             fill = "#FFF9C4", alpha = 0.5) +
+             fill = KAWAII_ORANGE, alpha = 0.06) +
 
     # Country lines (background, grey)
     geom_line(data = country_data,
               aes(x = Year, y = Prevalence_Mean, group = Entity),
-              color = "grey70", linewidth = 0.3, alpha = 0.5) +
+              color = "#B0B0B0", linewidth = 0.3, alpha = 0.25) +
 
     # Region lines (foreground, colored)
     geom_line(data = region_data,
@@ -1673,7 +1608,7 @@ create_figure3_trajectories <- function(trend_data,
     # Success stories highlighted
     geom_line(data = success_data,
               aes(x = Year, y = Prevalence_Mean, group = Entity),
-              color = "#1B5E20", linewidth = 0.8, linetype = "dashed") +
+              color = KAWAII_GREEN, linewidth = 0.8, linetype = "dashed") +
 
     # Labels for success stories at end of line
     geom_text_repel(
@@ -1681,10 +1616,10 @@ create_figure3_trajectories <- function(trend_data,
         group_by(Entity) %>%
         filter(Year == max(Year)),
       aes(x = Year, y = Prevalence_Mean, label = tools::toTitleCase(Entity)),
-      nudge_x = 2, size = 2.5, color = "#1B5E20"
+      nudge_x = 2, size = 2.5, color = KAWAII_GREEN
     ) +
 
-    scale_color_viridis_d(option = "D", name = "Region") +
+    scale_color_manual(values = region_colors, name = "Region") +
     scale_y_continuous(limits = c(0, NA), labels = function(x) paste0(x, "%")) +
     theme_who() +
     labs(
@@ -1695,39 +1630,40 @@ create_figure3_trajectories <- function(trend_data,
       caption = "Dashed green lines: countries near endgame (NZ, Sweden, etc.)"
     )
 
-  ggsave(paste0("outputs/figures/trajectories/Figure3_Trajectories_", gender_filter, ".pdf"),
-         fig3, width = 12, height = 8)
-  ggsave(paste0("outputs/figures/trajectories/Figure3_Trajectories_", gender_filter, ".png"),
-         fig3, width = 12, height = 8, dpi = 300)
+  ggsave(paste0("figures_publication/trajectories/Figure3_Trajectories_", gender_filter, ".pdf"),
+         fig3, width = 12, height = 8, bg = "white")
+  ggsave(paste0("figures_publication/trajectories/Figure3_Trajectories_", gender_filter, ".png"),
+         fig3, width = 12, height = 8, dpi = 300, bg = "white")
 
-  cat(sprintf("  Saved: outputs/figures/trajectories/Figure3_Trajectories_%s.pdf\n", gender_filter))
+  cat(sprintf("  Saved: figures_publication/trajectories/Figure3_Trajectories_%s.pdf\n", gender_filter))
 
   return(fig3)
 }
 
 # ============================================================================
-# FIGURE 4: AGE-COHORT HEATMAP (Lexis Diagram)
+# FIGURE 4: BIRTH COHORT PREVALENCE CURVES
 # ============================================================================
 
-#' Create Figure 4: Age-Cohort Heatmap
-#' Shows prevalence surface with diagonal birth cohort lines
+#' Create Figure 4: Birth Cohort Prevalence Curves
+#' Shows prevalence trajectories by birth cohort over calendar year.
+#' Each line = one birth cohort; solid = observed period, dashed = projected.
 #'
-#' @param predictions Data frame with Year, Age_Midpoint, Prevalence
+#' @param predictions Data frame with Year, Age_Midpoint, Birth_Cohort, Prevalence
 #' @param country_code Country to plot (or "global" for aggregated)
 #' @param gender Gender to plot
-create_figure4_heatmap <- function(predictions,
-                                    country_code = "global",
-                                    gender = "males",
-                                    indicator = PRIMARY_INDICATOR) {
+#' @param indicator Indicator to plot
+create_figure4_cohort <- function(predictions,
+                                   country_code = "global",
+                                   gender = "males",
+                                   indicator = PRIMARY_INDICATOR) {
 
-  cat(sprintf("  Creating Figure 4: Age-Cohort Heatmap (%s, %s)...\n", country_code, gender))
+  cat(sprintf("  Creating Figure 4: Birth Cohort Curves (%s, %s)...\n", country_code, gender))
 
   # Filter data
   cntry_col <- if ("Country" %in% names(predictions)) "Country" else "wb_country_abv"
   sx_col <- if ("Sex" %in% names(predictions)) "Sex" else "sex"
 
   if (country_code == "global") {
-    # Aggregate across sample countries
     sample_countries <- c("usa", "gbr", "chn", "ind", "bra", "deu")
     plot_data <- predictions %>%
       filter(!!sym(cntry_col) %in% sample_countries) %>%
@@ -1744,79 +1680,109 @@ create_figure4_heatmap <- function(predictions,
     filter(!!sym(ind_col) == indicator)
 
   if (nrow(plot_data) == 0) {
-    cat("  WARNING: No data for heatmap\n")
+    cat("  WARNING: No data for cohort plot\n")
     return(NULL)
   }
 
-  # Get year and age columns
+  # Get column names
   year_col <- if ("Year" %in% names(plot_data)) "Year" else "year"
   age_col <- if ("Age_Midpoint" %in% names(plot_data)) "Age_Midpoint" else "age"
   prev_col <- if ("Prevalence" %in% names(plot_data)) "Prevalence" else "prevalence"
+  cohort_col <- if ("Birth_Cohort" %in% names(plot_data)) "Birth_Cohort" else NULL
 
-  # Convert prevalence to percentage if needed
+  # Convert prevalence to percentage
   plot_data <- plot_data %>%
     mutate(
       Year_Num = as.numeric(!!sym(year_col)),
       Age_Num = as.numeric(!!sym(age_col)),
-      Prev_Pct = if(max(!!sym(prev_col), na.rm = TRUE) <= 1) !!sym(prev_col) * 100 else !!sym(prev_col)
+      Prev_Pct = if (max(!!sym(prev_col), na.rm = TRUE) <= 1) !!sym(prev_col) * 100 else !!sym(prev_col)
     )
+
+  # Compute birth cohort if not present
+  if (!is.null(cohort_col)) {
+    plot_data <- plot_data %>%
+      mutate(Cohort = as.numeric(!!sym(cohort_col)))
+  } else {
+    plot_data <- plot_data %>%
+      mutate(Cohort = round(Year_Num - Age_Num))
+  }
 
   # Aggregate if multiple countries
   if (country_code == "global") {
     plot_data <- plot_data %>%
-      group_by(Year_Num, Age_Num) %>%
+      group_by(Year_Num, Age_Num, Cohort) %>%
       summarise(Prev_Pct = mean(Prev_Pct, na.rm = TRUE), .groups = "drop")
   }
 
-  # Create birth cohort lines
-  cohorts <- seq(1920, 2010, by = 20)
+  # Bin cohorts into 5-year groups for cleaner visualization
+  plot_data <- plot_data %>%
+    mutate(Cohort_Group = floor(Cohort / 5) * 5) %>%
+    group_by(Year_Num, Cohort_Group) %>%
+    summarise(Prev_Pct = mean(Prev_Pct, na.rm = TRUE), .groups = "drop") %>%
+    filter(Cohort_Group >= 1920 & Cohort_Group <= 2000)
 
-  fig4 <- ggplot(plot_data, aes(x = Year_Num, y = Age_Num, fill = Prev_Pct)) +
-    geom_tile() +
+  # Mark observed vs projected periods
+  plot_data <- plot_data %>%
+    mutate(Period = ifelse(Year_Num <= TARGET_YEAR, "Observed", "Projected"))
 
-    # Diagonal cohort lines (Birth_Cohort = Year - Age, so Age = Year - Cohort)
-    # intercept = -cohort because: y = x + b => Age = Year - Cohort => b = -Cohort
-    geom_abline(intercept = -cohorts, slope = 1,
-                color = "white", linewidth = 0.3, alpha = 0.6) +
+  # Create cohort label for legend
+  plot_data <- plot_data %>%
+    mutate(Cohort_Label = factor(Cohort_Group))
 
-    scale_fill_viridis_c(
-      option = "inferno",
-      direction = -1,
-      limits = c(0, NA),
-      name = "Prevalence (%)"
-    ) +
-    coord_fixed(ratio = 0.5, xlim = c(2000, 2040), ylim = c(15, 85)) +
+  # Build a sequential color palette from blue (oldest) to rose (youngest)
+  n_cohorts <- length(unique(plot_data$Cohort_Label))
+  cohort_palette <- colorRampPalette(c("#2166AC", KAWAII_BLUE, KAWAII_GREEN,
+                                        KAWAII_ORANGE, KAWAII_ROSE, "#B2182B"))(n_cohorts)
+  names(cohort_palette) <- levels(plot_data$Cohort_Label)
+
+  # Split data by period for solid/dashed styling
+  data_obs  <- plot_data %>% filter(Period == "Observed")
+  data_proj <- plot_data %>% filter(Period == "Projected")
+
+  fig4 <- ggplot() +
+    # Observed period: solid lines
+    geom_line(data = data_obs,
+              aes(x = Year_Num, y = Prev_Pct, color = Cohort_Label, group = Cohort_Label),
+              linewidth = 0.8) +
+    # Projected period: dashed lines
+    geom_line(data = data_proj,
+              aes(x = Year_Num, y = Prev_Pct, color = Cohort_Label, group = Cohort_Label),
+              linewidth = 0.8, linetype = "dashed") +
+
+    # Projection boundary marker
+    geom_vline(xintercept = TARGET_YEAR, linetype = "dotted",
+               color = REF_NULL, linewidth = 0.5) +
+    annotate("text", x = TARGET_YEAR - 0.5, y = Inf,
+             label = as.character(TARGET_YEAR), vjust = 1.5,
+             size = 2.5, color = TEXT_TIER4, fontface = "italic") +
+
+    scale_color_manual(values = cohort_palette, name = "Birth Cohort") +
+    scale_x_continuous(expand = expansion(mult = c(0.02, 0.05))) +
+    scale_y_continuous(limits = c(0, NA),
+                       labels = function(x) paste0(x, "%"),
+                       expand = expansion(mult = c(0.02, 0.08))) +
     theme_who() +
     theme(
-      panel.grid = element_blank()
+      legend.key.width = unit(1.0, "cm"),
+      legend.text = element_text(size = 8)
     ) +
     labs(
-      title = paste0("Age-Period-Cohort Prevalence Surface (",
-                     tools::toTitleCase(gender), ")"),
-      subtitle = paste0("Diagonal lines trace birth cohorts; ",
+      title = paste0("Birth Cohort Smoking Prevalence (",
+                     format_gender(gender), ")"),
+      subtitle = paste0("Each line traces one birth cohort over calendar year; ",
                         format_indicator(indicator)),
-      x = "Year",
-      y = "Age",
-      caption = "Color intensity shows smoking prevalence. White diagonals = birth cohorts."
+      x = "Calendar Year",
+      y = "Prevalence (%)",
+      caption = paste0("Solid = observed period; dashed = projected beyond ",
+                       TARGET_YEAR, ". Cohorts in 5-year groups.")
     )
 
-  # Add cohort labels
-  for (coh in cohorts) {
-    # Find intersection with plot area
-    y_at_2040 <- 2040 - coh
-    if (y_at_2040 > 15 && y_at_2040 < 85) {
-      fig4 <- fig4 + annotate("text", x = 2041, y = y_at_2040,
-                               label = paste0("Born ", coh),
-                               size = 2, hjust = 0, color = "grey40")
-    }
-  }
+  ggsave(paste0("figures_publication/cohorts/Figure4_Cohort_", country_code, "_", gender, ".pdf"),
+         fig4, width = 10, height = 7, bg = "white")
+  ggsave(paste0("figures_publication/cohorts/Figure4_Cohort_", country_code, "_", gender, ".png"),
+         fig4, width = 10, height = 7, dpi = 300, bg = "white")
 
-  ggsave(paste0("outputs/figures/heatmaps/Figure4_Heatmap_", country_code, "_", gender, ".pdf"),
-         fig4, width = 10, height = 8)
-  ggsave(paste0("outputs/figures/heatmaps/Figure4_Heatmap_", country_code, "_", gender, ".png"),
-         fig4, width = 10, height = 8, dpi = 300)
-
-  cat(sprintf("  Saved: outputs/figures/heatmaps/Figure4_Heatmap_%s_%s.pdf\n", country_code, gender))
+  cat(sprintf("  Saved: figures_publication/cohorts/Figure4_Cohort_%s_%s.pdf\n", country_code, gender))
 
   return(fig4)
 }
@@ -1877,14 +1843,15 @@ create_efigure1_validation <- function(observed_data,
   # Create plot
   efig1 <- ggplot(validation, aes(x = Prev_Obs, y = Prev_Global)) +
     # Perfect fit line
-    geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "#B71C1C", linewidth = 0.8) +
+    geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = REF_NULL, linewidth = 0.5) +
     # Scatter points
-    geom_point(alpha = 0.3, size = 0.8, color = "#2166AC") +
+    geom_point(alpha = 0.3, size = 0.8, color = KAWAII_BLUE) +
     # Linear fit
-    geom_smooth(method = "lm", se = FALSE, color = "black", linewidth = 0.6) +
+    geom_smooth(method = "lm", se = FALSE, color = KAWAII_ORANGE, linewidth = 0.6) +
     # Metrics annotation
-    annotate("text", x = 5, y = max(validation$Prev_Global, na.rm = TRUE) * 0.9,
+    annotate("label", x = 5, y = max(validation$Prev_Global, na.rm = TRUE) * 0.9,
              label = sprintf("R\u00B2 = %.3f\nRMSE = %.2f%%", r2_global, rmse_global),
+             color = TEXT_TIER2, fill = alpha("white", 0.9), label.size = 0,
              hjust = 0, size = 3.5, fontface = "bold") +
     coord_equal() +
     theme_who() +
@@ -1896,10 +1863,10 @@ create_efigure1_validation <- function(observed_data,
       caption = "Dashed line = perfect fit. Solid black = linear fit."
     )
 
-  ggsave("outputs/figures/validation/eFigure1_Validation.pdf", efig1, width = 8, height = 8)
-  ggsave("outputs/figures/validation/eFigure1_Validation.png", efig1, width = 8, height = 8, dpi = 300)
+  ggsave("figures_publication/validation/eFigure1_Validation.pdf", efig1, width = 8, height = 8, bg = "white")
+  ggsave("figures_publication/validation/eFigure1_Validation.png", efig1, width = 8, height = 8, dpi = 300, bg = "white")
 
-  cat("  Saved: outputs/figures/validation/eFigure1_Validation.pdf\n")
+  cat("  Saved: figures_publication/validation/eFigure1_Validation.pdf\n")
 
   return(efig1)
 }
@@ -2007,13 +1974,9 @@ create_efigure2_age_profile <- function(observed_data,
 
   # Create plot
   efig2 <- ggplot() +
-    # Background grid
-    geom_hline(yintercept = seq(0, 100, 20), color = "grey95", linewidth = 0.2) +
-
     # Model confidence ribbons
     geom_ribbon(data = pred_data,
-                aes(x = Age, ymin = Lower, ymax = Upper, fill = Model),
-                alpha = 0.15) +
+                aes(x = Age, ymin = Lower, ymax = Upper, fill = Model)) +
 
     # Model mean lines
     geom_line(data = pred_data,
@@ -2032,13 +1995,13 @@ create_efigure2_age_profile <- function(observed_data,
                size = 1.5, shape = 21, fill = "white", stroke = 0.5) +
 
     # Spline->Linear transition marker
-    geom_vline(xintercept = TRANSITION_START, color = "orange",
+    geom_vline(xintercept = TRANSITION_START, color = REF_EVENT,
                linetype = "dashed", alpha = 0.7) +
     annotate("text", x = TRANSITION_START + 1, y = 5,
-             label = "Spline\u2192Linear", size = 2.5, hjust = 0, color = "orange") +
+             label = "Spline\u2192Linear", size = 2.5, hjust = 0, color = TEXT_TIER4) +
 
-    scale_color_manual(values = c("Global APC" = "#2166AC", "Country APC" = "#D55E00")) +
-    scale_fill_manual(values = c("Global APC" = "#2166AC", "Country APC" = "#D55E00")) +
+    scale_color_manual(values = c("Global APC" = KAWAII_BLUE, "Country APC" = KAWAII_ROSE)) +
+    scale_fill_manual(values = c("Global APC" = "#BDD7EE", "Country APC" = "#F4B6C2")) +
     scale_linetype_manual(values = c("Global APC" = "solid", "Country APC" = "dashed")) +
     scale_y_continuous(limits = c(0, NA), labels = function(x) paste0(x, "%")) +
     scale_x_continuous(limits = c(15, 85)) +
@@ -2053,10 +2016,10 @@ create_efigure2_age_profile <- function(observed_data,
 
   # Save
   filename_base <- paste0("eFigure2_AgeProfile_", toupper(country_code), "_", gender, "_", year)
-  ggsave(paste0("outputs/figures/age_profiles/", filename_base, ".pdf"), efig2, width = 10, height = 6)
-  ggsave(paste0("outputs/figures/age_profiles/", filename_base, ".png"), efig2, width = 10, height = 6, dpi = 300)
+  ggsave(paste0("figures_publication/age_profiles/", filename_base, ".pdf"), efig2, width = 10, height = 6, bg = "white")
+  ggsave(paste0("figures_publication/age_profiles/", filename_base, ".png"), efig2, width = 10, height = 6, dpi = 300, bg = "white")
 
-  cat(sprintf("  Saved: outputs/figures/age_profiles/%s.pdf\n", filename_base))
+  cat(sprintf("  Saved: figures_publication/age_profiles/%s.pdf\n", filename_base))
 
   return(efig2)
 }
@@ -2136,25 +2099,25 @@ create_efigure3_trends <- function(weighted_trends,
   # Add ribbon if CIs available
   if (!is.null(lower_col) && !is.null(upper_col)) {
     efig3 <- efig3 +
-      geom_ribbon(aes(ymin = Lower_Pct, ymax = Upper_Pct), fill = "#2166AC", alpha = 0.2)
+      geom_ribbon(aes(ymin = Lower_Pct, ymax = Upper_Pct), fill = "#BDD7EE")
   }
 
   efig3 <- efig3 +
     # Mean line
-    geom_line(aes(y = Mean_Pct), color = "#2166AC", linewidth = 0.8) +
+    geom_line(aes(y = Mean_Pct), color = KAWAII_BLUE, linewidth = 0.8) +
 
     # Endgame target
-    geom_hline(yintercept = ENDGAME_THRESHOLD_PCT, linetype = "dashed", color = "#1B5E20", linewidth = 0.6) +
+    geom_hline(yintercept = ENDGAME_THRESHOLD_PCT, linetype = "dotted", color = REF_THRESHOLD, linewidth = 0.6) +
     annotate("text", x = min(trend_data$Year_Num), y = ENDGAME_THRESHOLD_PCT + 1,
-             label = paste0(ENDGAME_THRESHOLD_PCT, "% Endgame"), hjust = 0, size = 3, color = "#1B5E20") +
+             label = paste0(ENDGAME_THRESHOLD_PCT, "% Endgame"), hjust = 0, size = 3, color = TEXT_TIER3) +
 
     # Key year markers
-    geom_vline(xintercept = BASE_YEAR, linetype = "dotted", color = "grey50", linewidth = 0.5) +
-    geom_vline(xintercept = TARGET_YEAR, linetype = "dotted", color = "grey50", linewidth = 0.5) +
+    geom_vline(xintercept = BASE_YEAR, linetype = "dotted", color = REF_NULL, linewidth = 0.5) +
+    geom_vline(xintercept = TARGET_YEAR, linetype = "dotted", color = REF_NULL, linewidth = 0.5) +
     annotate("text", x = BASE_YEAR, y = max(trend_data$Mean_Pct, na.rm = TRUE) * 0.95,
-             label = "2010", hjust = 1.1, size = 2.5, color = "grey50") +
+             label = "2010", hjust = 1.1, size = 2.5, color = TEXT_TIER4) +
     annotate("text", x = TARGET_YEAR, y = max(trend_data$Mean_Pct, na.rm = TRUE) * 0.95,
-             label = "2025", hjust = -0.1, size = 2.5, color = "grey50") +
+             label = "2025", hjust = -0.1, size = 2.5, color = TEXT_TIER4) +
 
     scale_y_continuous(limits = c(0, NA), labels = function(x) paste0(x, "%")) +
     theme_who() +
@@ -2167,10 +2130,10 @@ create_efigure3_trends <- function(weighted_trends,
     )
 
   filename_base <- paste0("eFigure3_Trend_", toupper(country_code), "_", gender)
-  ggsave(paste0("outputs/figures/trends/", filename_base, ".pdf"), efig3, width = 10, height = 6)
-  ggsave(paste0("outputs/figures/trends/", filename_base, ".png"), efig3, width = 10, height = 6, dpi = 300)
+  ggsave(paste0("figures_publication/trends/", filename_base, ".pdf"), efig3, width = 10, height = 6, bg = "white")
+  ggsave(paste0("figures_publication/trends/", filename_base, ".png"), efig3, width = 10, height = 6, dpi = 300, bg = "white")
 
-  cat(sprintf("  Saved: outputs/figures/trends/%s.pdf\n", filename_base))
+  cat(sprintf("  Saved: figures_publication/trends/%s.pdf\n", filename_base))
 
   return(efig3)
 }
@@ -2206,7 +2169,7 @@ generate_all_figures <- function(clean_data,
       results$maps <- generate_all_probability_maps(
         weighted_results = weighted_results,
         mcmc_samples = NULL,  # TODO: Pass MCMC samples for proper uncertainty
-        output_dir = "outputs/figures/maps",
+        output_dir = "figures_publication/maps",
         primary_only = FALSE  # Set TRUE to only generate cigarettes maps
       )
     }, error = function(e) {
@@ -2230,10 +2193,10 @@ generate_all_figures <- function(clean_data,
     cat(sprintf("  ERROR eFigure 1: %s\n", e$message))
   })
 
-  # Figure 4: Heatmap (global)
+  # Figure 4: Birth Cohort (global)
   tryCatch({
-    results$fig4_men <- create_figure4_heatmap(global_predictions, "global", "males")
-    results$fig4_women <- create_figure4_heatmap(global_predictions, "global", "females")
+    results$fig4_men <- create_figure4_cohort(global_predictions, "global", "males")
+    results$fig4_women <- create_figure4_cohort(global_predictions, "global", "females")
   }, error = function(e) {
     cat(sprintf("  ERROR Figure 4: %s\n", e$message))
   })
@@ -2282,7 +2245,7 @@ generate_all_figures <- function(clean_data,
   cat("\n========== FIGURE GENERATION COMPLETE ==========\n")
 
   # Summary
-  fig_dirs <- c("maps", "caterpillar", "trajectories", "heatmaps", "validation", "age_profiles", "trends")
+  fig_dirs <- c("maps", "caterpillar", "trajectories", "cohorts", "validation", "age_profiles", "trends")
   cat("\nGenerated figures:\n")
   for (d in fig_dirs) {
     dir_path <- file.path("outputs/figures", d)

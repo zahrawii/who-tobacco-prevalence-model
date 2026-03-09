@@ -117,7 +117,10 @@ for (gender in genders) {
     Country = as.integer(gender_data$Num_Country),
     Country_Region = as.integer(country_region_for_model),
     Survey = as.integer(gender_data$Num_Survey),
-    empirical_mean_cig = empirical_mean_cig
+    empirical_mean_cig = empirical_mean_cig,
+    # Sum-to-zero constraint for CIG regional intercepts (break ridge)
+    ones_nRegion = rep(1, length(unique_regions)),
+    constraint_sd = 0.05
   )
 
   cat(sprintf("  Country_Region length: %d (should equal nCountry: %d)\n",
@@ -137,7 +140,9 @@ for (gender in genders) {
     age_linear_smooth = gender_data$age_linear_smooth,
     spline_weight_var = gender_data$spline_weight_var,
     linear_weight_var = gender_data$linear_weight_var,
-    weight = gender_data$weight
+    weight = gender_data$weight,
+    # Soft sum-to-zero constraint (CIG regional intercepts only)
+    cig_region_sum_obs = 0
   )
 
   # ---- 6.8 Save Regional Structure ----
@@ -189,7 +194,13 @@ for (gender in genders) {
       # Within-region precisions for CIG (one per region)
       cig_intercept_within_region_precision = rep(4, nimble_constants$nRegion) + rnorm(nimble_constants$nRegion, 0, 0.3),
       cig_age_spline_within_region_precision = rep(3, nimble_constants$nRegion) + rnorm(nimble_constants$nRegion, 0, 0.3),
-      cig_cohort_spline_within_region_precision = rep(3, nimble_constants$nRegion) + rnorm(nimble_constants$nRegion, 0, 0.3)
+      cig_cohort_spline_within_region_precision = rep(3, nimble_constants$nRegion) + rnorm(nimble_constants$nRegion, 0, 0.3),
+      # CIG regional intercepts: explicitly init centered (sum ≈ 0)
+      # to satisfy soft sum-to-zero constraint from model start
+      cig_region_intercept = local({
+        x <- rnorm(nimble_constants$nRegion, 0, 0.3)
+        x - mean(x)
+      })
     )
   }
 
@@ -264,6 +275,25 @@ for (gender in genders) {
 
   cat(sprintf("  Added %d block samplers for CIG spline parameters.\n",
               2 * nimble_constants$nCountry))
+
+  # ---- 6.11c Block Samplers for Global + Regional Intercepts ----
+  # CIG ONLY: Add block sampler for global + regional intercepts as a
+  # SUPPLEMENT to the existing scalar samplers (do NOT remove them).
+  # Hybrid strategy: scalar samplers make local moves (high acceptance),
+  # block sampler makes coordinated ridge moves (lower acceptance but
+  # learns the constraint surface). SMKEXTRA/ANYEXTRA are left with
+  # default scalar samplers — they converge well without intervention.
+
+  nR <- nimble_constants$nRegion
+  cig_intercept_nodes <- c("cig_global_intercept",
+                           paste0("cig_region_intercept[", 1:nR, "]"))
+  # NOTE: No removeSamplers() — keep the existing scalar RW samplers!
+  mcmc_config$addSampler(target = cig_intercept_nodes,
+                         type = "RW_block",
+                         control = list(adaptInterval = 200))
+
+  cat(sprintf("  Added 1 hybrid block sampler for CIG global+regional intercepts (%d-dim).\n",
+              1 + nR))
 
   # ---- 6.12 Build and Compile MCMC ----
 

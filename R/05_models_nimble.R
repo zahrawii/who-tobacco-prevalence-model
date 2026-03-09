@@ -13,6 +13,8 @@
 # ---- 5.1 Global Hierarchical Model (Stick-Breaking Construction) - NIMBLE ----
 # UPDATED: Strong data-informed priors on global intercepts to fix non-identifiability
 # while preserving the global mean interpretation
+# UPDATED v2.4.1: Soft sum-to-zero constraints on regional intercepts + block sampling
+# to fully break the global-regional ridge (R-hat 3.02 → target <1.05)
 
 regional_hierarchical_global_ac_model_nimble <- nimbleCode({
 
@@ -181,6 +183,19 @@ regional_hierarchical_global_ac_model_nimble <- nimbleCode({
                                                        sd = cohort_spline_between_region_sd)
     }
   }
+
+  # ==================================================================
+  # SOFT SUM-TO-ZERO CONSTRAINT ON CIG REGIONAL INTERCEPTS ONLY
+  # Breaks the global-regional ridge non-identifiability for the CIG
+  # head (the only one affected). SMKEXTRA/ANYEXTRA converge without
+  # constraints and adding them degrades their mixing.
+  # Implemented as pseudo-data: 0 ~ N(sum(cig_regions), sd=0.05)
+  # The sd=0.05 constrains |sum| < ~0.15 — enough to break the ridge
+  # without creating a near-singular penalty surface.
+  # ==================================================================
+
+  cig_region_sum <- inprod(cig_region_intercept[1:nRegion], ones_nRegion[1:nRegion])
+  cig_region_sum_obs ~ dnorm(cig_region_sum, sd = constraint_sd)
 
   # Shared within-region precision for smkextra/anyextra intercepts
   smkextra_intercept_within_region_precision ~ dgamma(4, 1)

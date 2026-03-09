@@ -55,9 +55,15 @@ FIG_BASE_DIR <- "outputs/figures"
 
 # Model colors (Module 13 specific)
 MODEL_COLORS <- c(
-  "Global" = "#2166AC",
-  "Country" = "#D55E00",
-  "Observed" = "#000000"
+  "Global"   = KAWAII_BLUE,
+  "Country"  = KAWAII_ROSE,
+  "Observed" = "#1A1A1A"
+)
+
+MODEL_COLORS_LIGHT <- c(
+  "Global"   = "#BDD7EE",
+  "Country"  = "#F4B6C2",
+  "Observed" = "#D5D5D5"
 )
 
 # ============================================================================
@@ -69,24 +75,6 @@ MODEL_COLORS <- c(
 create_age_groups <- function(ages, breaks = c(15, 25, 35, 45, 55, 65, 75, 85, 100)) {
   cut(ages, breaks = breaks, labels = paste0(head(breaks, -1), "-", tail(breaks, -1) - 1),
       include.lowest = TRUE, right = FALSE)
-}
-
-#' WHO publication theme
-theme_who_pub <- function(base_size = 10) {
-  theme_minimal(base_size = base_size) +
-    theme(
-      plot.title = element_text(face = "bold", size = rel(1.1), hjust = 0),
-      plot.subtitle = element_text(color = "#555555", size = rel(0.9)),
-      plot.caption = element_text(color = "#777777", size = rel(0.7), hjust = 1),
-      axis.title = element_text(face = "bold", size = rel(0.9)),
-      axis.text = element_text(color = "#333333"),
-      panel.grid.minor = element_blank(),
-      panel.grid.major = element_line(color = "#E5E5E5", linewidth = 0.3),
-      strip.background = element_rect(fill = "#F5F5F5", color = NA),
-      strip.text = element_text(face = "bold", size = rel(0.85)),
-      legend.position = "bottom",
-      legend.title = element_text(face = "bold", size = rel(0.8))
-    )
 }
 
 #' Create directory structure
@@ -176,7 +164,7 @@ plot_age_curve_faceted <- function(obs_data, pred_data, country_name, gender, ye
   # Transition marker
   p <- p +
     geom_vline(xintercept = TRANSITION_START, linetype = "dashed",
-               color = "orange", alpha = 0.6, linewidth = 0.5)
+               color = REF_EVENT, alpha = 0.6, linewidth = 0.5)
 
   # Facet and styling
   p <- p +
@@ -185,7 +173,7 @@ plot_age_curve_faceted <- function(obs_data, pred_data, country_name, gender, ye
     scale_fill_manual(values = MODEL_COLORS, name = "Model") +
     scale_x_continuous(limits = c(15, 85), breaks = seq(20, 80, 20)) +
     scale_y_continuous(labels = function(x) paste0(x, "%"), limits = c(0, NA)) +
-    theme_who_pub() +
+    theme_who() +
     labs(
       title = paste0("Age-Specific Prevalence: ", country_name),
       subtitle = paste0(gender_label, " | Year: ", year),
@@ -235,7 +223,7 @@ plot_age_curve_overlay <- function(obs_data, pred_data, country_name, gender, ye
   # Transition marker
   p <- p +
     geom_vline(xintercept = TRANSITION_START, linetype = "dashed",
-               color = "grey50", alpha = 0.5)
+               color = REF_NULL, alpha = 0.5)
 
   # Styling
   p <- p +
@@ -243,7 +231,7 @@ plot_age_curve_overlay <- function(obs_data, pred_data, country_name, gender, ye
                        labels = function(x) gsub("Current |Daily ", "", x)) +
     scale_x_continuous(limits = c(15, 85)) +
     scale_y_continuous(labels = function(x) paste0(x, "%"), limits = c(0, NA)) +
-    theme_who_pub() +
+    theme_who() +
     theme(legend.position = "right") +
     labs(
       title = paste0("Age-Specific Prevalence: ", country_name),
@@ -298,9 +286,9 @@ create_age_curve_plots <- function(country_code, gender, year,
   tryCatch({
     p_faceted <- plot_age_curve_faceted(obs, pred, country_name, gender, year)
     ggsave(file.path(out_dir, "faceted_by_indicator.pdf"), p_faceted,
-           width = 10, height = 7)
+           width = 10, height = 7, bg = "white")
     ggsave(file.path(out_dir, "faceted_by_indicator.png"), p_faceted,
-           width = 10, height = 7, dpi = 150)
+           width = 10, height = 7, dpi = 300, bg = "white")
   }, error = function(e) {
     warning(sprintf("Faceted plot failed for %s/%s/%s: %s", country_code, gender, year, e$message))
   })
@@ -309,9 +297,9 @@ create_age_curve_plots <- function(country_code, gender, year,
   tryCatch({
     p_overlay <- plot_age_curve_overlay(obs, pred, country_name, gender, year)
     ggsave(file.path(out_dir, "overlay_all_indicators.pdf"), p_overlay,
-           width = 10, height = 6)
+           width = 10, height = 6, bg = "white")
     ggsave(file.path(out_dir, "overlay_all_indicators.png"), p_overlay,
-           width = 10, height = 6, dpi = 150)
+           width = 10, height = 6, dpi = 300, bg = "white")
   }, error = function(e) {
     warning(sprintf("Overlay plot failed for %s/%s/%s: %s", country_code, gender, year, e$message))
   })
@@ -336,7 +324,7 @@ plot_trend_faceted <- function(trend_data, country_name, gender) {
   # Endgame zone
   p <- p +
     annotate("rect", xmin = -Inf, xmax = Inf, ymin = 0, ymax = ENDGAME_THRESHOLD_PCT,
-             fill = "#E8F5E9", alpha = 0.6)
+             fill = KAWAII_GREEN, alpha = 0.06)
 
   # Confidence ribbon if available
   lower_col <- if ("weighted_lower_ci" %in% names(trend_data)) "weighted_lower_ci" else
@@ -346,7 +334,7 @@ plot_trend_faceted <- function(trend_data, country_name, gender) {
   if (!is.null(lower_col) && !is.null(upper_col)) {
     p <- p + geom_ribbon(
       aes(ymin = !!sym(lower_col) * 100, ymax = !!sym(upper_col) * 100),
-      fill = "#2166AC", alpha = 0.2
+      fill = "#BDD7EE"
     )
   }
 
@@ -354,21 +342,21 @@ plot_trend_faceted <- function(trend_data, country_name, gender) {
   mean_col <- if ("weighted_mean" %in% names(trend_data)) "weighted_mean" else "Prevalence"
   p <- p + geom_line(
     aes(y = !!sym(mean_col) * 100),
-    color = "#2166AC", linewidth = 0.8
+    color = KAWAII_BLUE, linewidth = 0.8
   )
 
   # Key year markers
   p <- p +
-    geom_vline(xintercept = BASE_YEAR, linetype = "dotted", color = "grey50") +
-    geom_vline(xintercept = TARGET_YEAR, linetype = "dotted", color = "grey50") +
-    geom_hline(yintercept = ENDGAME_THRESHOLD_PCT, linetype = "dashed",
-               color = "#1B5E20", linewidth = 0.5)
+    geom_vline(xintercept = BASE_YEAR, linetype = "dotted", color = REF_NULL) +
+    geom_vline(xintercept = TARGET_YEAR, linetype = "dotted", color = REF_NULL) +
+    geom_hline(yintercept = ENDGAME_THRESHOLD_PCT, linetype = "dotted",
+               color = REF_THRESHOLD, linewidth = 0.5)
 
   # Facet and styling
   p <- p +
     facet_wrap(~ Indicator_Label, ncol = 3, scales = "free_y") +
     scale_y_continuous(labels = function(x) paste0(x, "%"), limits = c(0, NA)) +
-    theme_who_pub() +
+    theme_who() +
     labs(
       title = paste0("Prevalence Trends: ", country_name),
       subtitle = paste0(gender_label, " | All Indicators"),
@@ -396,7 +384,7 @@ plot_trend_overlay <- function(trend_data, country_name, gender) {
   # Endgame zone
   p <- p +
     annotate("rect", xmin = -Inf, xmax = Inf, ymin = 0, ymax = ENDGAME_THRESHOLD_PCT,
-             fill = "#E8F5E9", alpha = 0.6)
+             fill = KAWAII_GREEN, alpha = 0.06)
 
   # Light ribbons if available
   lower_col <- if ("weighted_lower_ci" %in% names(trend_data)) "weighted_lower_ci" else
@@ -406,7 +394,7 @@ plot_trend_overlay <- function(trend_data, country_name, gender) {
   if (!is.null(lower_col) && !is.null(upper_col)) {
     p <- p + geom_ribbon(
       aes(ymin = !!sym(lower_col) * 100, ymax = !!sym(upper_col) * 100),
-      alpha = 0.1, color = NA
+      alpha = 0.15, color = NA
     )
   }
 
@@ -415,17 +403,17 @@ plot_trend_overlay <- function(trend_data, country_name, gender) {
 
   # Key markers
   p <- p +
-    geom_vline(xintercept = BASE_YEAR, linetype = "dotted", color = "grey50") +
-    geom_vline(xintercept = TARGET_YEAR, linetype = "dotted", color = "grey50") +
-    geom_hline(yintercept = ENDGAME_THRESHOLD_PCT, linetype = "dashed",
-               color = "#1B5E20", linewidth = 0.5)
+    geom_vline(xintercept = BASE_YEAR, linetype = "dotted", color = REF_NULL) +
+    geom_vline(xintercept = TARGET_YEAR, linetype = "dotted", color = REF_NULL) +
+    geom_hline(yintercept = ENDGAME_THRESHOLD_PCT, linetype = "dotted",
+               color = REF_THRESHOLD, linewidth = 0.5)
 
   # Styling
   p <- p +
     scale_color_manual(values = INDICATOR_COLORS, name = "Indicator") +
     scale_fill_manual(values = INDICATOR_COLORS, name = "Indicator") +
     scale_y_continuous(labels = function(x) paste0(x, "%"), limits = c(0, NA)) +
-    theme_who_pub() +
+    theme_who() +
     theme(legend.position = "right") +
     labs(
       title = paste0("Prevalence Trends: ", country_name),
@@ -454,9 +442,9 @@ plot_trend_single <- function(trend_data, indicator, country_name, gender) {
   # Endgame zone
   p <- p +
     annotate("rect", xmin = -Inf, xmax = Inf, ymin = 0, ymax = ENDGAME_THRESHOLD_PCT,
-             fill = "#E8F5E9", alpha = 0.6) +
+             fill = KAWAII_GREEN, alpha = 0.06) +
     annotate("text", x = min(data$Year) + 1, y = ENDGAME_THRESHOLD_PCT / 2,
-             label = "Endgame Zone", hjust = 0, size = 3, color = "#1B5E20")
+             label = "Endgame Zone", hjust = 0, size = 3, color = TEXT_TIER4)
 
   # Confidence ribbon
   lower_col <- if ("weighted_lower_ci" %in% names(data)) "weighted_lower_ci" else
@@ -466,7 +454,7 @@ plot_trend_single <- function(trend_data, indicator, country_name, gender) {
   if (!is.null(lower_col) && !is.null(upper_col)) {
     p <- p + geom_ribbon(
       aes(ymin = !!sym(lower_col) * 100, ymax = !!sym(upper_col) * 100),
-      fill = INDICATOR_COLORS[indicator], alpha = 0.2
+      fill = INDICATOR_COLORS[indicator], alpha = 0.15
     )
   }
 
@@ -478,15 +466,15 @@ plot_trend_single <- function(trend_data, indicator, country_name, gender) {
 
   # Key markers
   p <- p +
-    geom_vline(xintercept = BASE_YEAR, linetype = "dotted", color = "grey50") +
-    geom_vline(xintercept = TARGET_YEAR, linetype = "dotted", color = "grey50") +
-    geom_hline(yintercept = ENDGAME_THRESHOLD_PCT, linetype = "dashed",
-               color = "#1B5E20", linewidth = 0.5)
+    geom_vline(xintercept = BASE_YEAR, linetype = "dotted", color = REF_NULL) +
+    geom_vline(xintercept = TARGET_YEAR, linetype = "dotted", color = REF_NULL) +
+    geom_hline(yintercept = ENDGAME_THRESHOLD_PCT, linetype = "dotted",
+               color = REF_THRESHOLD, linewidth = 0.5)
 
   # Styling
   p <- p +
     scale_y_continuous(labels = function(x) paste0(x, "%"), limits = c(0, NA)) +
-    theme_who_pub() +
+    theme_who() +
     labs(
       title = paste0(indicator_label, ": ", country_name),
       subtitle = gender_label,
@@ -538,9 +526,9 @@ create_trend_plots <- function(country_code, gender, trend_data,
   tryCatch({
     p_faceted <- plot_trend_faceted(data, country_name, gender)
     ggsave(file.path(out_dir, "all_indicators_faceted.pdf"), p_faceted,
-           width = 10, height = 7)
+           width = 10, height = 7, bg = "white")
     ggsave(file.path(out_dir, "all_indicators_faceted.png"), p_faceted,
-           width = 10, height = 7, dpi = 150)
+           width = 10, height = 7, dpi = 300, bg = "white")
   }, error = function(e) {
     warning(sprintf("Trend faceted plot failed: %s", e$message))
   })
@@ -549,9 +537,9 @@ create_trend_plots <- function(country_code, gender, trend_data,
   tryCatch({
     p_overlay <- plot_trend_overlay(data, country_name, gender)
     ggsave(file.path(out_dir, "all_indicators_overlay.pdf"), p_overlay,
-           width = 10, height = 6)
+           width = 10, height = 6, bg = "white")
     ggsave(file.path(out_dir, "all_indicators_overlay.png"), p_overlay,
-           width = 10, height = 6, dpi = 150)
+           width = 10, height = 6, dpi = 300, bg = "white")
   }, error = function(e) {
     warning(sprintf("Trend overlay plot failed: %s", e$message))
   })
@@ -563,9 +551,9 @@ create_trend_plots <- function(country_code, gender, trend_data,
       if (!is.null(p_single)) {
         ind_short <- gsub("_user_|_tobacco_|_product", "", ind)
         ggsave(file.path(out_dir, paste0(ind_short, "_trend.pdf")), p_single,
-               width = 8, height = 5)
+               width = 8, height = 5, bg = "white")
         ggsave(file.path(out_dir, paste0(ind_short, "_trend.png")), p_single,
-               width = 8, height = 5, dpi = 150)
+               width = 8, height = 5, dpi = 300, bg = "white")
       }
     }, error = function(e) {
       warning(sprintf("Single trend plot failed for %s: %s", ind, e$message))
@@ -589,11 +577,11 @@ plot_validation_global <- function(validation_data) {
 
   p <- ggplot(validation_data, aes(x = Observed, y = Predicted)) +
     # Perfect fit line
-    geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "#B71C1C", linewidth = 0.8) +
+    geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = REF_NULL, linewidth = 0.5) +
     # Points
-    geom_point(alpha = 0.3, size = 0.8, color = "#2166AC") +
+    geom_point(alpha = 0.3, size = 0.8, color = KAWAII_BLUE) +
     # Linear fit
-    geom_smooth(method = "lm", se = FALSE, color = "black", linewidth = 0.6) +
+    geom_smooth(method = "lm", se = FALSE, color = KAWAII_ORANGE, linewidth = 0.6) +
     # Metrics annotation
     annotate("text", x = min(validation_data$Observed, na.rm = TRUE) + 2,
              y = max(validation_data$Predicted, na.rm = TRUE) * 0.95,
@@ -601,7 +589,7 @@ plot_validation_global <- function(validation_data) {
                              r2, rmse, format(n, big.mark = ",")),
              hjust = 0, size = 3.5, fontface = "bold") +
     coord_equal() +
-    theme_who_pub() +
+    theme_who() +
     labs(
       title = "Model Validation: Observed vs Predicted Prevalence",
       subtitle = "Global APC Model - All Countries and Indicators",
@@ -631,14 +619,14 @@ plot_validation_by_age <- function(validation_data) {
     mutate(label = sprintf("R\u00B2=%.2f\nn=%d", r2, n))
 
   p <- ggplot(validation_data, aes(x = Observed, y = Predicted)) +
-    geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "#B71C1C", linewidth = 0.5) +
-    geom_point(alpha = 0.2, size = 0.5, color = "#2166AC") +
-    geom_smooth(method = "lm", se = FALSE, color = "black", linewidth = 0.4) +
+    geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = REF_NULL, linewidth = 0.5) +
+    geom_point(alpha = 0.2, size = 0.5, color = KAWAII_BLUE) +
+    geom_smooth(method = "lm", se = FALSE, color = KAWAII_ORANGE, linewidth = 0.4) +
     geom_text(data = r2_by_age, aes(label = label),
               x = Inf, y = -Inf, hjust = 1.1, vjust = -0.5, size = 2.5) +
     facet_wrap(~ Age_Group, ncol = 4) +
     coord_equal() +
-    theme_who_pub() +
+    theme_who() +
     labs(
       title = "Model Validation by Age Group",
       subtitle = "Spline fit quality across age bands",
@@ -667,14 +655,14 @@ plot_validation_by_indicator <- function(validation_data) {
     mutate(label = sprintf("R\u00B2=%.3f\nRMSE=%.1f%%", r2, rmse))
 
   p <- ggplot(validation_data, aes(x = Observed, y = Predicted)) +
-    geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "#B71C1C", linewidth = 0.5) +
-    geom_point(alpha = 0.2, size = 0.5, color = "#2166AC") +
-    geom_smooth(method = "lm", se = FALSE, color = "black", linewidth = 0.4) +
+    geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = REF_NULL, linewidth = 0.5) +
+    geom_point(alpha = 0.2, size = 0.5, color = KAWAII_BLUE) +
+    geom_smooth(method = "lm", se = FALSE, color = KAWAII_ORANGE, linewidth = 0.4) +
     geom_text(data = r2_by_ind, aes(label = label),
               x = Inf, y = -Inf, hjust = 1.1, vjust = -0.5, size = 2.5) +
     facet_wrap(~ Indicator_Label, ncol = 3) +
     coord_equal() +
-    theme_who_pub() +
+    theme_who() +
     labs(
       title = "Model Validation by Indicator",
       subtitle = "Comparing fit quality across tobacco product types",
@@ -703,23 +691,23 @@ plot_residuals_by_age <- function(validation_data) {
 
   p <- ggplot(validation_data, aes(x = Age, y = Residual)) +
     # Zero line
-    geom_hline(yintercept = 0, linetype = "dashed", color = "#1B5E20", linewidth = 0.5) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = REF_NULL, linewidth = 0.5) +
     # Transition marker
     geom_vline(xintercept = TRANSITION_START, linetype = "dashed",
-               color = "orange", alpha = 0.6) +
+               color = REF_EVENT, alpha = 0.6) +
     annotate("text", x = TRANSITION_START + 1, y = max(validation_data$Residual, na.rm = TRUE) * 0.9,
-             label = "Spline\u2192Linear", hjust = 0, size = 2.5, color = "orange") +
+             label = "Spline\u2192Linear", hjust = 0, size = 2.5, color = TEXT_TIER4) +
     # Points
-    geom_point(alpha = 0.15, size = 0.5, color = "#2166AC") +
+    geom_point(alpha = 0.15, size = 0.5, color = KAWAII_BLUE) +
     # LOESS smooth
-    geom_smooth(method = "loess", se = TRUE, color = "#B71C1C", fill = "#FFCDD2",
+    geom_smooth(method = "loess", se = TRUE, color = KAWAII_ORANGE, fill = "#F8CBAD",
                 linewidth = 0.8, alpha = 0.3) +
     # Summary ribbon
     geom_ribbon(data = residual_summary,
                 aes(x = Age, ymin = mean_resid - sd_resid, ymax = mean_resid + sd_resid),
                 alpha = 0.1, fill = "grey50") +
     scale_x_continuous(limits = c(15, 85)) +
-    theme_who_pub() +
+    theme_who() +
     labs(
       title = "Residuals by Age: Spline Fit Quality",
       subtitle = "Residual = Observed - Predicted. Ideal: flat at zero.",
@@ -789,8 +777,8 @@ create_validation_plots <- function(observed_data, predictions, base_dir = FIG_B
   # Global scatter
   tryCatch({
     p_global <- plot_validation_global(validation)
-    ggsave(file.path(val_dir, "global_scatter.pdf"), p_global, width = 8, height = 8)
-    ggsave(file.path(val_dir, "global_scatter.png"), p_global, width = 8, height = 8, dpi = 150)
+    ggsave(file.path(val_dir, "global_scatter.pdf"), p_global, width = 8, height = 8, bg = "white")
+    ggsave(file.path(val_dir, "global_scatter.png"), p_global, width = 8, height = 8, dpi = 300, bg = "white")
     cat("    Saved: global_scatter\n")
   }, error = function(e) warning(e$message))
 
@@ -798,9 +786,9 @@ create_validation_plots <- function(observed_data, predictions, base_dir = FIG_B
   tryCatch({
     p_age <- plot_validation_by_age(validation)
     ggsave(file.path(val_dir, "by_age_group", "validation_age_facets.pdf"), p_age,
-           width = 12, height = 8)
+           width = 12, height = 8, bg = "white")
     ggsave(file.path(val_dir, "by_age_group", "validation_age_facets.png"), p_age,
-           width = 12, height = 8, dpi = 150)
+           width = 12, height = 8, dpi = 300, bg = "white")
     cat("    Saved: by_age_group\n")
   }, error = function(e) warning(e$message))
 
@@ -808,17 +796,17 @@ create_validation_plots <- function(observed_data, predictions, base_dir = FIG_B
   tryCatch({
     p_ind <- plot_validation_by_indicator(validation)
     ggsave(file.path(val_dir, "by_indicator", "validation_indicator_facets.pdf"), p_ind,
-           width = 10, height = 7)
+           width = 10, height = 7, bg = "white")
     ggsave(file.path(val_dir, "by_indicator", "validation_indicator_facets.png"), p_ind,
-           width = 10, height = 7, dpi = 150)
+           width = 10, height = 7, dpi = 300, bg = "white")
     cat("    Saved: by_indicator\n")
   }, error = function(e) warning(e$message))
 
   # Residuals by age
   tryCatch({
     p_resid <- plot_residuals_by_age(validation)
-    ggsave(file.path(val_dir, "residuals_by_age.pdf"), p_resid, width = 10, height = 6)
-    ggsave(file.path(val_dir, "residuals_by_age.png"), p_resid, width = 10, height = 6, dpi = 150)
+    ggsave(file.path(val_dir, "residuals_by_age.pdf"), p_resid, width = 10, height = 6, bg = "white")
+    ggsave(file.path(val_dir, "residuals_by_age.png"), p_resid, width = 10, height = 6, dpi = 300, bg = "white")
     cat("    Saved: residuals_by_age\n")
   }, error = function(e) warning(e$message))
 
