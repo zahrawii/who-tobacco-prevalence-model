@@ -118,9 +118,9 @@ for (gender in genders) {
     Country_Region = as.integer(country_region_for_model),
     Survey = as.integer(gender_data$Num_Survey),
     empirical_mean_cig = empirical_mean_cig,
-    # Sum-to-zero constraint for CIG regional intercepts (break ridge)
-    ones_nRegion = rep(1, length(unique_regions)),
-    constraint_sd = 0.05
+    # CIG global intercept absorbed as constant to break global-regional ridge.
+    # Regional intercepts become deviations from this known grand mean.
+    cig_global_intercept = empirical_mean_cig
   )
 
   cat(sprintf("  Country_Region length: %d (should equal nCountry: %d)\n",
@@ -140,9 +140,7 @@ for (gender in genders) {
     age_linear_smooth = gender_data$age_linear_smooth,
     spline_weight_var = gender_data$spline_weight_var,
     linear_weight_var = gender_data$linear_weight_var,
-    weight = gender_data$weight,
-    # Soft sum-to-zero constraint (CIG regional intercepts only)
-    cig_region_sum_obs = 0
+    weight = gender_data$weight
   )
 
   # ---- 6.8 Save Regional Structure ----
@@ -166,7 +164,7 @@ for (gender in genders) {
   generate_global_inits <- function(seed_offset = 0, emp_mean = -1.5) {
     set.seed(RANDOM_SEED + seed_offset)
     list(
-      cig_global_intercept = emp_mean + rnorm(1, 0, 0.05),
+      # cig_global_intercept is a constant (not initialized)
       smkextra_global_intercept = -3.0 + rnorm(1, 0, 0.05),
       anyextra_global_intercept = -4.0 + rnorm(1, 0, 0.05),
       cig_def_code_shared = rnorm(1, 0.3, 0.05),
@@ -194,13 +192,7 @@ for (gender in genders) {
       # Within-region precisions for CIG (one per region)
       cig_intercept_within_region_precision = rep(4, nimble_constants$nRegion) + rnorm(nimble_constants$nRegion, 0, 0.3),
       cig_age_spline_within_region_precision = rep(3, nimble_constants$nRegion) + rnorm(nimble_constants$nRegion, 0, 0.3),
-      cig_cohort_spline_within_region_precision = rep(3, nimble_constants$nRegion) + rnorm(nimble_constants$nRegion, 0, 0.3),
-      # CIG regional intercepts: explicitly init centered (sum ≈ 0)
-      # to satisfy soft sum-to-zero constraint from model start
-      cig_region_intercept = local({
-        x <- rnorm(nimble_constants$nRegion, 0, 0.3)
-        x - mean(x)
-      })
+      cig_cohort_spline_within_region_precision = rep(3, nimble_constants$nRegion) + rnorm(nimble_constants$nRegion, 0, 0.3)
     )
   }
 
@@ -232,7 +224,7 @@ for (gender in genders) {
     nimble_model,
     useConjugacy = FALSE,
     monitors = c(
-      "cig_global_intercept", "cig_def_code_shared",
+      "cig_def_code_shared",  # cig_global_intercept is a constant, not monitored
       "smkextra_global_intercept", "anyextra_global_intercept",
       "cig_region_intercept", "smkextra_region_intercept", "anyextra_region_intercept",
       "cig_age_spline_region_mean", "smkextra_age_spline_region_mean", "anyextra_age_spline_region_mean",
@@ -276,24 +268,39 @@ for (gender in genders) {
   cat(sprintf("  Added %d block samplers for CIG spline parameters.\n",
               2 * nimble_constants$nCountry))
 
-  # ---- 6.11c Block Samplers for Global + Regional Intercepts ----
-  # CIG ONLY: Add block sampler for global + regional intercepts as a
-  # SUPPLEMENT to the existing scalar samplers (do NOT remove them).
-  # Hybrid strategy: scalar samplers make local moves (high acceptance),
-  # block sampler makes coordinated ridge moves (lower acceptance but
-  # learns the constraint surface). SMKEXTRA/ANYEXTRA are left with
-  # default scalar samplers — they converge well without intervention.
+  # ---- 6.11c Configure Block Samplers for CIG Regional Parameters ----
+  # Block samplers for regional intercept + cohort spline means per region.
+  # Addresses ridge non-identifiability: shifting region_intercept by +delta
+  # and cohort_spline_region_mean by -delta leaves likelihood nearly invariant.
+  # These are SUPPLEMENTARY (scalar samplers retained for marginal moves).
 
-  nR <- nimble_constants$nRegion
-  cig_intercept_nodes <- c("cig_global_intercept",
-                           paste0("cig_region_intercept[", 1:nR, "]"))
-  # NOTE: No removeSamplers() — keep the existing scalar RW samplers!
-  mcmc_config$addSampler(target = cig_intercept_nodes,
+  cat("  Configuring block samplers for CIG regional parameters...\n")
+
+  for (r in 1:nimble_constants$nRegion) {
+    regional_nodes <- c(
+      paste0("cig_region_intercept[", r, "]"),
+      paste0("cig_cohort_spline_region_mean[", r, ", ",
+             1:nimble_constants$nCohortSpline, "]")
+    )
+    mcmc_config$addSampler(target = regional_nodes,
+                           type = "RW_block",
+                           control = list(adaptInterval = 500))
+  }
+
+  # Special cross-level block for Region 6 (North America, only 2 countries).
+  # With so few countries, regional intercept is nearly non-identifiable from
+  # the country intercepts. Block proposes joint shifts along the ridge.
+  region6_countries <- which(nimble_constants$Country_Region == 6)
+  cross_level_nodes <- c(
+    "cig_region_intercept[6]",
+    paste0("cig_country_intercept_raw[", region6_countries, "]")
+  )
+  mcmc_config$addSampler(target = cross_level_nodes,
                          type = "RW_block",
-                         control = list(adaptInterval = 200))
+                         control = list(adaptInterval = 500))
 
-  cat(sprintf("  Added 1 hybrid block sampler for CIG global+regional intercepts (%d-dim).\n",
-              1 + nR))
+  cat(sprintf("  Added %d regional block samplers + 1 cross-level block for CIG.\n",
+              nimble_constants$nRegion))
 
   # ---- 6.12 Build and Compile MCMC ----
 
@@ -589,7 +596,7 @@ for (gender in genders) {
   sampled_indices <- sort(sample(nrow(combined_samples_matrix), n_samples))
 
   cig_samples <- list(
-    global_intercept  = combined_samples_matrix[sampled_indices, "cig_global_intercept"],
+    global_intercept  = rep(empirical_mean_cig, n_samples),  # constant (absorbed)
     region_intercept  = combined_samples_matrix[sampled_indices, grep("^cig_region_intercept\\[", colnames(combined_samples_matrix))],
     age_linear_smooth = combined_samples_matrix[sampled_indices, "cig_age_linear_smooth_effect"],
     country_intercept = combined_samples_matrix[sampled_indices, grep("^cig_country_intercept\\[", colnames(combined_samples_matrix))],
